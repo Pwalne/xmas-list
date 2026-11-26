@@ -12,8 +12,8 @@ function setupWishlist() {
   if (headers.some((header, index) => header !== WISHLIST_HEADERS[index])) {
     throw new Error('The Gifts tab needs the headers shown in the repository README.');
   }
-  if ((properties.getProperty('WISHLIST_PASSPHRASE') || '').length < 20) {
-    throw new Error('Set WISHLIST_PASSPHRASE to a strong passphrase of at least 20 characters.');
+  if (!properties.getProperty('WISHLIST_PASSPHRASE')) {
+    throw new Error('Set WISHLIST_PASSPHRASE to the family passphrase.');
   }
   if (!properties.getProperty('WISHLIST_SIGNING_KEY')) {
     properties.setProperty('WISHLIST_SIGNING_KEY', Utilities.getUuid() + Utilities.getUuid());
@@ -44,7 +44,7 @@ function doPost(event) {
     const properties = PropertiesService.getScriptProperties();
     const passphrase = properties.getProperty('WISHLIST_PASSPHRASE');
     const secret = properties.getProperty('WISHLIST_SIGNING_KEY');
-    if (!passphrase || passphrase.length < 20 || !secret) {
+    if (!passphrase || !secret) {
       return wishlistResponse_({ ok: false, code: 'service_unavailable' });
     }
     if (request.action === 'unlock') {
