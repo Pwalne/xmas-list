@@ -16,10 +16,13 @@ Clear the Sheet's **Purchased** checkbox to undo an accidental purchase. Shopper
 see gift additions, edits, and checkmark resets the next time they load or refresh
 the list.
 
+Enter an optional US-dollar amount in **Price**. The site displays the saved
+amount until you update it in the Sheet. A blank price is hidden.
+
 ## Deploying the wishlist
 
 1. Use a private spreadsheet with a **Gifts** tab and these five headers in row 1:
-   **Gift ID**, **Gift name**, **Shopping link**, **Priority**, **Purchased**.
+   **Gift ID**, **Gift name**, **Shopping link**, **Priority**, **Purchased**, **Price**.
    Format the **Purchased** cells as checkboxes.
 2. In the standalone Apps Script editor, set the source of **Code.gs** to the
    contents of [Wishlist.gs](apps-script/Wishlist.gs). This file is the whole

@@ -16,6 +16,7 @@ const available = document.querySelector('#available');
 const purchased = document.querySelector('#purchased');
 const purchasedPanel = document.querySelector('#purchased-panel');
 const template = document.querySelector('#gift-template');
+const priceFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 let token = '';
 let gifts = [];
@@ -88,7 +89,13 @@ function renderGifts() {
   const purchasedRows = document.createDocumentFragment();
   gifts.forEach(gift => {
     const row = template.content.cloneNode(true);
-    row.querySelector('.gift-name').textContent = gift.name;
+    const name = row.querySelector('.gift-name');
+    name.textContent = gift.name;
+    if (Number.isFinite(gift.price) && gift.price >= 0) {
+      const price = document.createElement('span');
+      price.textContent = priceFormat.format(gift.price);
+      name.after(price);
+    }
     const link = row.querySelector('.shop-link');
     const url = shoppingUrl(gift.url);
     if (url) {

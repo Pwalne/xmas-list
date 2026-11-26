@@ -1,4 +1,4 @@
-const WISHLIST_HEADERS = ['Gift ID', 'Gift name', 'Shopping link', 'Priority', 'Purchased'];
+const WISHLIST_HEADERS = ['Gift ID', 'Gift name', 'Shopping link', 'Priority', 'Purchased', 'Price'];
 const PRIORITIES = { high: 0, normal: 1, low: 2 };
 const SESSION_LIFETIME_MS = 4 * 60 * 60 * 1000;
 const ATTEMPT_WINDOW_MS = 2 * 60 * 1000;
@@ -145,7 +145,7 @@ function listWishlistGifts_(sheet) {
   const existingIds = new Set(rows.map(row => row[0]).filter(validWishlistId_));
   const seenIds = new Set();
   let idsAssigned = false;
-  rows.forEach(([id, value, link, priority, purchased], index) => {
+  rows.forEach(([id, value, link, priority, purchased, price], index) => {
     const name = String(value).trim();
     if (!name) return;
     if (!validWishlistId_(id) || seenIds.has(id)) {
@@ -161,6 +161,7 @@ function listWishlistGifts_(sheet) {
       name,
       url: /^https?:\/\/[^\s]+$/i.test(String(link).trim()) ? String(link).trim() : '',
       purchased: purchased === true,
+      price: Number.isFinite(price) && price >= 0 ? price : null,
       priority: typeof rank === 'number' ? rank : PRIORITIES.normal,
       order: index,
     });
@@ -170,7 +171,7 @@ function listWishlistGifts_(sheet) {
     Number(left.purchased) - Number(right.purchased) ||
     (left.purchased ? 0 : left.priority - right.priority) ||
     left.order - right.order);
-  return gifts.map(({ id, name, url, purchased }) => ({ id, name, url, purchased }));
+  return gifts.map(({ id, name, url, purchased, price }) => ({ id, name, url, purchased, price }));
 }
 
 function purchaseWishlistGift_(sheet, id) {
