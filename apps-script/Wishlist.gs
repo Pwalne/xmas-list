@@ -4,16 +4,11 @@ const SESSION_LIFETIME_MS = 4 * 60 * 60 * 1000;
 const ATTEMPT_WINDOW_MS = 2 * 60 * 1000;
 const MAX_FAILED_ATTEMPTS = 12;
 
-// Run once in the editor after setting the two WISHLIST_* configuration properties.
+// Run in the editor after setting WISHLIST_SPREADSHEET_ID.
 function setupWishlist() {
   const properties = PropertiesService.getScriptProperties();
-  const sheet = wishlistSheet_(properties);
-  const headers = sheet.getRange(1, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
-  if (headers.some((header, index) => header !== WISHLIST_HEADERS[index])) {
-    throw new Error('The Gifts tab needs the headers shown in the repository README.');
-  }
-  if (!properties.getProperty('WISHLIST_PASSPHRASE')) {
-    throw new Error('Set WISHLIST_PASSPHRASE to the family passphrase.');
+  if (!wishlistSpreadsheet_(properties).getSheets().some(isWishlistSheet_)) {
+    throw new Error('At least one tab needs the headers shown in the repository README.');
   }
   if (!properties.getProperty('WISHLIST_SIGNING_KEY')) {
     properties.setProperty('WISHLIST_SIGNING_KEY', Utilities.getUuid() + Utilities.getUuid());
@@ -42,30 +37,26 @@ function doPost(event) {
 
   try {
     const properties = PropertiesService.getScriptProperties();
-    const passphrase = properties.getProperty('WISHLIST_PASSPHRASE');
     const secret = properties.getProperty('WISHLIST_SIGNING_KEY');
-    if (!passphrase || !secret) {
+    if (!secret) {
       return wishlistResponse_({ ok: false, code: 'service_unavailable' });
     }
     if (request.action === 'unlock') {
-      if (typeof request.passphrase !== 'string' || request.passphrase.length > 256) {
+      if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
         return wishlistResponse_({ ok: false, code: 'invalid_request' });
       }
-      return wishlistResponse_(withWishlistLock_(() => unlockWishlist_(request, properties, passphrase, secret)));
+      return wishlistResponse_(withWishlistLock_(() => unlockWishlist_(request.passphrase, properties, secret)));
     }
     if (request.action !== 'list' && request.action !== 'purchase') {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
-    }
-    const sessionKey = signWishlist_('session-key:' + passphrase, secret);
-    if (!validWishlistToken_(request.token, sessionKey, Date.now())) {
-      return wishlistResponse_({ ok: false, code: 'session_expired' });
     }
     if (request.action === 'purchase' && !validWishlistId_(request.giftId)) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
     }
 
     return wishlistResponse_(withWishlistLock_(() => {
-      const sheet = wishlistSheet_(properties);
+      const sheet = wishlistSessionSheet_(request.token, properties, secret, Date.now());
+      if (!sheet) return { ok: false, code: 'session_expired' };
       if (request.action === 'purchase') return purchaseWishlistGift_(sheet, request.giftId);
       return { ok: true, gifts: listWishlistGifts_(sheet) };
     }));
@@ -85,30 +76,47 @@ function withWishlistLock_(callback) {
   }
 }
 
-function unlockWishlist_(request, properties, passphrase, secret) {
+function unlockWishlist_(passphrase, properties, secret) {
   const now = Date.now();
   const stored = properties.getProperty('WISHLIST_FAILED_ATTEMPTS');
   const [until, count] = (stored || '0:0').split(':').map(Number);
   if (until > now && count >= MAX_FAILED_ATTEMPTS) {
     return { ok: false, code: 'rate_limited' };
   }
-  if (!sameWishlistSignature_(signWishlist_(request.passphrase, secret), signWishlist_(passphrase, secret))) {
+  const spreadsheet = wishlistSpreadsheet_(properties);
+  let sheet = spreadsheet.getSheetByName(passphrase);
+  const legacyPassphrase = properties.getProperty('WISHLIST_PASSPHRASE');
+  // Keep the original passphrase working while the original tab is being migrated.
+  if (sheet && (sheet.getName() !== passphrase || (legacyPassphrase && passphrase === 'Gifts'))) {
+    sheet = null;
+  }
+  if (!sheet && legacyPassphrase && passphrase === legacyPassphrase) {
+    sheet = spreadsheet.getSheetByName('Gifts');
+  }
+  if (!sheet || !isWishlistSheet_(sheet)) {
     properties.setProperty('WISHLIST_FAILED_ATTEMPTS', until > now
       ? until + ':' + (count + 1)
       : (now + ATTEMPT_WINDOW_MS) + ':1');
     return { ok: false, code: 'incorrect_passphrase' };
   }
   if (stored) properties.deleteProperty('WISHLIST_FAILED_ATTEMPTS');
-  const sessionKey = signWishlist_('session-key:' + passphrase, secret);
-  const payload = (now + SESSION_LIFETIME_MS) + '.' + Utilities.getUuid();
-  return { ok: true, token: payload + '.' + signWishlist_('token:' + payload, sessionKey) };
+  const payload = (now + SESSION_LIFETIME_MS) + '.' + sheet.getSheetId() + '.' + Utilities.getUuid();
+  return { ok: true, token: payload + '.' + signWishlistSession_(payload, sheet, secret) };
 }
 
-function validWishlistToken_(token, key, now) {
-  if (typeof token !== 'string' || !/^\d{13}\.[a-f0-9-]{36}\.[A-Za-z0-9_-]{43}$/.test(token)) return false;
-  const [expires, nonce, signature] = token.split('.');
-  return Number(expires) > now &&
-    sameWishlistSignature_(signature, signWishlist_('token:' + expires + '.' + nonce, key));
+function wishlistSessionSheet_(token, properties, secret, now) {
+  if (typeof token !== 'string' || !/^\d{13}\.\d{1,10}\.[a-f0-9-]{36}\.[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const [expires, sheetId, nonce, signature] = token.split('.');
+  if (Number(expires) <= now) return null;
+  const sheet = wishlistSpreadsheet_(properties).getSheetById(Number(sheetId));
+  if (!sheet) return null;
+  const payload = expires + '.' + sheetId + '.' + nonce;
+  return sameWishlistSignature_(signature, signWishlistSession_(payload, sheet, secret)) &&
+    isWishlistSheet_(sheet) ? sheet : null;
+}
+
+function signWishlistSession_(payload, sheet, secret) {
+  return signWishlist_(JSON.stringify(['wishlist-session', payload, sheet.getName()]), secret);
 }
 
 function signWishlist_(value, key) {
@@ -125,12 +133,16 @@ function sameWishlistSignature_(left, right) {
   return difference === 0;
 }
 
-function wishlistSheet_(properties) {
+function wishlistSpreadsheet_(properties) {
   const id = properties.getProperty('WISHLIST_SPREADSHEET_ID');
   if (!id) throw new Error('Set WISHLIST_SPREADSHEET_ID to the private wishlist Sheet ID.');
-  const sheet = SpreadsheetApp.openById(id).getSheetByName('Gifts');
-  if (!sheet) throw new Error('The wishlist spreadsheet needs a Gifts tab.');
-  return sheet;
+  return SpreadsheetApp.openById(id);
+}
+
+function isWishlistSheet_(sheet) {
+  if (sheet.getMaxColumns() < WISHLIST_HEADERS.length) return false;
+  const headers = sheet.getRange(1, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
+  return WISHLIST_HEADERS.every((header, index) => header === headers[index]);
 }
 
 function validWishlistId_(id) {
