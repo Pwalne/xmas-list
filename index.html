@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#14382f">
+  <meta name="wishlist-endpoint" content="">
+  <title>Family Christmas Wishlist</title>
+  <link rel="stylesheet" href="./wishlist.css">
+  <script src="./wishlist.js" defer></script>
+</head>
+<body>
+  <main class="wishlist">
+    <header class="hero">
+      <div class="hero-copy">
+        <h1>Family Christmas<br>Wishlist</h1>
+        <p>Gift ideas and purchase updates for the whole family.</p>
+      </div>
+      <div class="illustration" aria-hidden="true">
+        <span class="spark spark-one">✦</span><span class="spark spark-two">✧</span>
+        <span class="spark spark-three">✦</span><span class="spark spark-four">✧</span>
+        <span class="gift gift-small"></span><span class="gift gift-large"></span>
+      </div>
+    </header>
+
+    <section id="unlock-panel" class="panel entry" aria-labelledby="unlock-heading">
+      <h2 id="unlock-heading">Open the wishlist</h2>
+      <p>Enter the passphrase shared by your family.</p>
+      <form id="unlock">
+        <label for="passphrase">Family passphrase</label>
+        <div class="entry-fields">
+          <input id="passphrase" type="password" required maxlength="256" autocomplete="off"
+            autocapitalize="none" spellcheck="false">
+          <button type="submit">Unlock wishlist</button>
+        </div>
+      </form>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section id="gifts-panel" class="panel" aria-labelledby="gifts-heading" hidden>
+      <div class="list-header">
+        <h2 id="gifts-heading" tabindex="-1">Gift ideas</h2>
+        <div class="actions">
+          <button id="refresh" class="secondary" type="button">Refresh</button>
+          <button id="lock" class="secondary" type="button">Lock list</button>
+        </div>
+      </div>
+      <p id="empty" hidden></p>
+      <ul id="available" class="gift-list"></ul>
+      <section id="purchased-panel" aria-labelledby="purchased-heading" hidden>
+        <h3 id="purchased-heading">Purchased</h3>
+        <ul id="purchased" class="gift-list purchased-list"></ul>
+      </section>
+    </section>
+  </main>
+
+  <template id="gift-template">
+    <li class="gift-row">
+      <div>
+        <strong class="gift-name"></strong>
+        <a class="shop-link" target="_blank" rel="noopener noreferrer" hidden>Shopping link</a>
+      </div>
+      <label class="purchase-control">
+        <input type="checkbox">
+        <span>I bought this</span>
+      </label>
+      <span class="purchased-label" hidden>Purchased</span>
+    </li>
+  </template>
+  <noscript><p class="no-script">Enable JavaScript to open the family wishlist.</p></noscript>
+</body>
+</html>
