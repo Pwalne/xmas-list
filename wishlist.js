@@ -2,6 +2,8 @@
 
 const endpoint = document.querySelector('meta[name="wishlist-endpoint"]').content;
 const sessionStorageKey = 'family-christmas-wishlist-session';
+const selectionStorageKey = 'family-christmas-wishlist-selection';
+const wishlistTabs = document.querySelector('#wishlist-tabs');
 const unlockPanel = document.querySelector('#unlock-panel');
 const unlockForm = document.querySelector('#unlock');
 const passphrase = document.querySelector('#passphrase');
@@ -24,6 +26,8 @@ const targetProductPhotos = new Map([
 let token = '';
 let gifts = [];
 let busy = false;
+let lists = [];
+let selectedList = null;
 
 const errors = {
   incorrect_passphrase: 'That passphrase didn’t match. Try again.',
@@ -31,6 +35,7 @@ const errors = {
   session_expired: 'Your session expired. Enter the family passphrase again.',
   gift_missing: 'This gift may have changed. Refresh the list and try again.',
   busy: 'The wishlist is busy. Please try again.',
+  list_unavailable: 'This list’s Google Sheet is unavailable. Ask the list organizer to check its sharing and setup.',
 };
 
 function showStatus(message, isError = false) {
@@ -54,7 +59,50 @@ function setBusy(value) {
   passphrase.readOnly = value;
   refresh.disabled = value;
   lock.disabled = value;
+  wishlistTabs.querySelectorAll('button').forEach(button => { button.disabled = value; });
   available.querySelectorAll('input').forEach(input => { input.disabled = value; });
+}
+
+function selectWishlist(id) {
+  selectedList = lists.find(list => list.id === id) || null;
+  giftsHeading.textContent = selectedList ? selectedList.name + '’s gift ideas' : 'Gift ideas';
+  wishlistTabs.querySelectorAll('button').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.listId === id));
+  });
+  try {
+    if (selectedList) sessionStorage.setItem(selectionStorageKey, selectedList.id);
+    else sessionStorage.removeItem(selectionStorageKey);
+  } catch {
+    // Selection still works for the current page.
+  }
+}
+
+function renderWishlistTabs() {
+  wishlistTabs.replaceChildren();
+  for (const list of lists) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'secondary';
+    button.dataset.listId = list.id;
+    button.textContent = list.name;
+    button.addEventListener('click', async () => {
+      if (busy || selectedList?.id === list.id) return;
+      selectWishlist(list.id);
+      clearGifts();
+      setBusy(true);
+      showStatus('Opening wishlist…');
+      try {
+        await loadGifts(true);
+        showStatus('');
+      } catch (error) {
+        reportError(error, 'Couldn’t open this wishlist. Use Refresh to try again.');
+      } finally {
+        setBusy(false);
+      }
+    });
+    wishlistTabs.append(button);
+  }
+  wishlistTabs.hidden = !lists.length;
 }
 
 async function request(action, fields = {}) {
@@ -139,10 +187,18 @@ function renderGifts() {
   empty.textContent = gifts.length ? 'All gifts have been purchased.' : 'No gifts have been added yet.';
 }
 
-function showLocked(shouldFocus = true) {
-  storeSession('');
+function clearGifts() {
   gifts = [];
   renderGifts();
+  empty.hidden = true;
+}
+
+function showLocked(shouldFocus = true) {
+  storeSession('');
+  lists = [];
+  selectedList = null;
+  renderWishlistTabs();
+  clearGifts();
   giftsPanel.hidden = true;
   unlockPanel.hidden = false;
   passphrase.value = '';
@@ -155,7 +211,7 @@ function reportError(error, fallback) {
 }
 
 async function loadGifts(focusHeading = false) {
-  const result = await request('list');
+  const result = await request('list', { listId: selectedList?.id });
   gifts = result.gifts;
   passphrase.value = '';
   unlockPanel.hidden = true;
@@ -164,11 +220,46 @@ async function loadGifts(focusHeading = false) {
   if (focusHeading) giftsHeading.focus();
 }
 
+async function openWishlists(focusHeading = false) {
+  let previousSelection;
+  try {
+    previousSelection = sessionStorage.getItem(selectionStorageKey);
+  } catch {
+    // Continue without a saved selection.
+  }
+
+  try {
+    const directory = await request('directory');
+    lists = directory.lists;
+  } catch (error) {
+    // Older deployments support the original single-list form.
+    if (error.message !== 'invalid_request') throw error;
+    lists = [];
+    renderWishlistTabs();
+    selectWishlist(null);
+    return loadGifts(focusHeading);
+  }
+
+  const next = lists.find(list => list.id === (selectedList?.id || previousSelection)) || lists[0];
+  if (next?.id !== selectedList?.id) clearGifts();
+  renderWishlistTabs();
+  selectWishlist(next?.id);
+  passphrase.value = '';
+  unlockPanel.hidden = true;
+  giftsPanel.hidden = false;
+  if (next) return loadGifts(focusHeading);
+
+  clearGifts();
+  empty.textContent = 'No wishlists have been configured yet.';
+  empty.hidden = false;
+  if (focusHeading) giftsHeading.focus();
+}
+
 async function markPurchased(gift, checkbox) {
   setBusy(true);
   showStatus('Saving purchase…');
   try {
-    const result = await request('purchase', { giftId: gift.id });
+    const result = await request('purchase', { giftId: gift.id, listId: selectedList?.id });
     gift.purchased = true;
     renderGifts();
     giftsHeading.focus();
@@ -189,7 +280,7 @@ unlockForm.addEventListener('submit', async event => {
   try {
     const result = await request('unlock', { passphrase: passphrase.value });
     storeSession(result.token);
-    await loadGifts(true);
+    await openWishlists(true);
     showStatus('');
   } catch (error) {
     if (unlockPanel.hidden === false) storeSession('');
@@ -204,7 +295,7 @@ refresh.addEventListener('click', async () => {
   setBusy(true);
   showStatus('Refreshing…');
   try {
-    await loadGifts();
+    await openWishlists();
     showStatus('Wishlist updated.');
   } catch (error) {
     reportError(error, 'Couldn’t refresh the wishlist. Please try again.');
@@ -233,7 +324,7 @@ async function restoreSession() {
   setBusy(true);
   showStatus('Opening wishlist…');
   try {
-    await loadGifts();
+    await openWishlists();
     showStatus('');
   } catch (error) {
     showLocked(false);

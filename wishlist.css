@@ -114,6 +114,8 @@ button:disabled { opacity: .6; cursor: default; }
 .status { margin: .7rem 0 0; min-height: 0; color: #385b49; }
 .status:empty { display: none; }
 .status.error { color: #942e3e; }
+#wishlist-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+#wishlist-tabs button[aria-pressed="true"] { background: #244f3c; color: #fff; }
 .list-header, .actions { display: flex; align-items: center; gap: .5rem; }
 .list-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: .85rem; }
 .gift-list { list-style: none; margin: 0; padding: 0; }

@@ -1,9 +1,9 @@
 # Family Christmas Wishlist
 
 The GitHub Pages site lets shoppers unlock the list, follow shopping links, and
-mark gifts as purchased. Each wishlist lives in a tab of the same private
-Google spreadsheet. The tab name is that list's passphrase, including case
-and spaces.
+mark gifts as purchased. One shared passphrase opens the site and all configured
+lists. Each website tab can use a gift tab in the organizer's spreadsheet or
+a separate Google spreadsheet maintained by another family.
 
 ## Managing gifts
 
@@ -20,11 +20,27 @@ the list.
 Enter an optional US-dollar amount in **Price**. The site displays the saved
 amount until you update it in the Sheet. A blank price is hidden.
 
-To add another wishlist, create a blank tab with the headers and checkboxes
-described below. Give it its own passphrase as the tab name. Keep the
-spreadsheet private and share each tab name only with that list's shoppers.
-Rename a tab to change its passphrase. Open sessions for that list will need
-the new passphrase on their next request. Sessions also expire after four hours.
+## Adding a child's wishlist
+
+In the organizer's private spreadsheet, add one row to **Wishlist settings**.
+The first row contains these headings, in order.
+
+| Column | What to enter |
+| --- | --- |
+| List ID | A unique, stable ID using lowercase letters, digits, hyphens, or underscores. |
+| Child name | The tab label shoppers see after unlocking. |
+| Spreadsheet URL or ID | Leave blank for the organizer's workbook. Paste the Google Sheets URL for a separate workbook. |
+| Gift tab | The exact name of the tab with the gift headers below. |
+
+For a separate workbook, have its owner share it as **Editor** with the Google
+account that deployed the web app. That account writes purchase checkmarks.
+Families can edit their own gift sheet directly. The organizer adds its URL to
+the private settings tab and keeps that workbook private. The site lists the
+configured children after unlocking. Settings changes appear after Refresh or
+a page reload. Only the organizer needs access to the settings spreadsheet.
+
+Change the `WISHLIST_PASSPHRASE` script property to revoke existing site
+sessions. Sessions also expire after four hours.
 
 ## Deploying the wishlist
 
@@ -35,7 +51,8 @@ the new passphrase on their next request. Sessions also expire after four hours.
    contents of [Wishlist.gs](apps-script/Wishlist.gs). This file is the whole
    production script, with its own web app handlers.
 3. Under **Script Properties** in **Project Settings**, set the private spreadsheet
-   ID as `WISHLIST_SPREADSHEET_ID`. Run `setupWishlist` in the editor to
+   ID as `WISHLIST_SPREADSHEET_ID` and the shared passphrase as
+   `WISHLIST_PASSPHRASE`. Run `setupWishlist` in the editor to
    verify the headers and create the signing key. Approve access if Google asks.
 4. Deploy a **Web app** that executes as the owner and allows **Anyone** to
    reach the passphrase prompt. Put the published URL ending in `/exec` in the
@@ -45,10 +62,9 @@ the new passphrase on their next request. Sessions also expire after four hours.
    its checkbox in the Sheet and check the list again from a signed-out phone.
    Remove the temporary gift before sharing the page and passphrase with family.
 
-When upgrading the original single-list deployment, first publish the new
-version at the existing web app URL. Then rename the original **Gifts** tab
-to the current passphrase and remove the old `WISHLIST_PASSPHRASE` script
-property. The old passphrase continues to open **Gifts** until the rename.
+The original **Gifts** tab can keep its existing passphrase. Configure its
+settings row with List ID `family`, label `Family`, Gift tab `Gifts`, and leave
+the spreadsheet cell blank.
 
 
 ## Connection test
