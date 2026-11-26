@@ -25,8 +25,8 @@ the list.
    contents of [Wishlist.gs](apps-script/Wishlist.gs). This file is the whole
    production script, with its own web app handlers.
 3. In **Project Settings → Script Properties**, set the private spreadsheet ID
-   as `WISHLIST_SPREADSHEET_ID` and a strong family passphrase of at least 20
-   characters as `WISHLIST_PASSPHRASE`. Run `setupWishlist` in the editor to
+   as `WISHLIST_SPREADSHEET_ID` and the family passphrase as
+   `WISHLIST_PASSPHRASE`. Run `setupWishlist` in the editor to
    verify the headers and create the signing key. Approve access if Google asks.
 4. Deploy a **Web app** that executes as the owner and allows **Anyone** to
    reach the passphrase prompt. Put the published URL ending in `/exec` in the
