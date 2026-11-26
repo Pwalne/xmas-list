@@ -126,6 +126,9 @@ button:disabled { opacity: .6; cursor: default; }
   padding: .85rem 0;
 }
 .gift-row > div { min-width: 0; overflow-wrap: anywhere; }
+.gift-details { display: flex; align-items: center; gap: .8rem; }
+.gift-details > div { min-width: 0; }
+.gift-photo { flex: none; width: 4.5rem; height: 4.5rem; object-fit: contain; border-radius: .45rem; background: #fff; }
 .gift-name, .shop-link { display: block; }
 .shop-link { width: fit-content; margin-top: .14rem; color: #295a42; font-size: .9rem; }
 .purchase-control { display: flex; flex: none; align-items: center; gap: .43rem; min-height: 2.75rem; cursor: pointer; }
