@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wishlist connection test</title>
+<style>
+  body { margin: 0 auto; max-width: 32rem; padding: 2rem 1.25rem; color: #202925; background: #f7f8f4; font: 1rem/1.5 system-ui, sans-serif; }
+  form, section { padding: 1.25rem; border: 1px solid #bdc8bf; border-radius: .75rem; background: #fff; }
+  label, input { display: block; }
+  input { box-sizing: border-box; width: 100%; margin: .25rem 0 1rem; padding: .65rem; }
+  button { padding: .65rem 1rem; border: 1px solid #174c35; border-radius: .4rem; color: #fff; background: #174c35; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  section { margin-top: 1rem; }
+</style>
+<main>
+  <h1>Wishlist connection test</h1>
+  <form id="connection">
+    <label for="endpoint">Apps Script deployment URL</label>
+    <input id="endpoint" type="url" required>
+    <label for="passphrase">Test passphrase</label>
+    <input id="passphrase" type="password" required autocomplete="off">
+    <button id="read" type="submit">Read sample gift</button>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <section id="sample" hidden>
+    <h2 id="gift-name"></h2>
+    <button id="purchase" type="button">Mark purchased</button>
+  </section>
+</main>
+<script>
+  const form = document.querySelector('#connection');
+  const endpoint = document.querySelector('#endpoint');
+  const passphrase = document.querySelector('#passphrase');
+  const readButton = document.querySelector('#read');
+  const purchase = document.querySelector('#purchase');
+  const sample = document.querySelector('#sample');
+  const status = document.querySelector('#status');
+  let gift;
+
+  function displayGift(nextGift) {
+    gift = nextGift;
+    sample.hidden = !gift;
+    if (!gift) return;
+    document.querySelector('#gift-name').textContent = gift.name;
+    purchase.textContent = gift.purchased ? 'Purchased' : 'Mark purchased';
+    purchase.disabled = gift.purchased;
+  }
+
+  async function send(action) {
+    readButton.disabled = true;
+    purchase.disabled = true;
+    endpoint.readOnly = true;
+    passphrase.readOnly = true;
+    status.textContent = action === 'read' ? 'Reading sample gift…' : 'Saving purchase…';
+    try {
+      const url = new URL(endpoint.value);
+      if (url.origin !== 'https://script.google.com' ||
+          !/^\/macros\/s\/[\w-]+\/exec$/.test(url.pathname) || url.search || url.hash ||
+          url.username || url.password) {
+        throw new Error('Enter the published Apps Script URL ending in /exec.');
+      }
+      const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify({ action, passphrase: passphrase.value, giftId: gift?.id }),
+      });
+      if (!response.ok) throw new Error('The deployment returned HTTP ' + response.status + '.');
+      const result = await response.json();
+      if (!result.ok) throw new Error('The script returned ' + result.code + '.');
+      displayGift(result.gift);
+      status.textContent = action === 'read'
+        ? 'Sample gift loaded.'
+        : result.alreadyPurchased ? 'The gift was already purchased.' : 'Purchase saved to the Sheet.';
+    } catch (error) {
+      status.textContent = error instanceof TypeError
+        ? 'The browser could not read the response. Check the deployment and cross-origin access.'
+        : error.message;
+    } finally {
+      readButton.disabled = false;
+      purchase.disabled = !gift || gift.purchased;
+      endpoint.readOnly = false;
+      passphrase.readOnly = false;
+    }
+  }
+
+  form.addEventListener('input', () => {
+    displayGift(undefined);
+    status.textContent = '';
+  });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    displayGift(undefined);
+    send('read');
+  });
+  purchase.addEventListener('click', () => send('purchase'));
+</script>
+</html>
