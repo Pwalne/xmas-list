@@ -172,7 +172,7 @@ function renderGifts() {
     const checkbox = control.querySelector('input');
     control.hidden = gift.purchased;
     row.querySelector('.purchased-label').hidden = !gift.purchased;
-    checkbox.setAttribute('aria-label', 'I bought this: ' + gift.name);
+    checkbox.setAttribute('aria-label', 'Purchased: ' + gift.name);
     checkbox.disabled = busy;
     checkbox.addEventListener('change', () => {
       checkbox.checked = false;
