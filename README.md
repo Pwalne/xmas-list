@@ -35,8 +35,9 @@ spreadsheet. Supply the child name, the Google Sheet link or ID if it is a
 separate workbook, and the exact gift tab name. The site checks the gift
 tab and assigns a List ID for you.
 
-Once admin mode is unlocked, select a wishlist tab and use the pinned
-**Add gift** button. Enter a gift name or shopping link, with an optional
+Once admin mode is unlocked, select a wishlist tab and use **Add gift**.
+The button sits below a short list and floats on a scrolling page.
+Enter a gift name or shopping link, with an optional
 priority and price. Use **Exit admin** when you're finished.
 The pencil and **×** on each gift let you edit it or delete its entry
 from the connected Google Sheet.

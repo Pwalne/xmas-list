@@ -21,6 +21,7 @@ const adminStatus = document.querySelector('#admin-status');
 const adminHeading = document.querySelector('#admin-heading');
 const cancelAdmin = document.querySelector('#cancel-admin-dialog');
 const openAddGift = document.querySelector('#open-add-gift');
+const giftAddFooter = document.querySelector('#gift-add-footer');
 const editConnectedList = document.querySelector('#edit-connected-list');
 const removeConnectedList = document.querySelector('#remove-connected-list');
 const addGiftForm = document.querySelector('#add-gift');
@@ -74,7 +75,23 @@ const errors = {
 function showStatus(message, isError = false) {
   status.textContent = message;
   status.classList.toggle('error', isError);
+  status.classList.remove('opening');
 }
+
+function showOpeningStatus() {
+  showStatus('Opening wishlist…');
+  status.classList.add('opening');
+}
+
+function updateGiftButtonPlacement() {
+  if (giftAddFooter.hidden) return;
+  // The footer keeps the same height when the button floats.
+  const footerBottom = giftAddFooter.getBoundingClientRect().bottom + window.scrollY;
+  giftAddFooter.classList.toggle('floating', footerBottom > document.documentElement.clientHeight + 1);
+}
+
+new ResizeObserver(updateGiftButtonPlacement).observe(giftAddFooter.parentElement);
+window.addEventListener('resize', updateGiftButtonPlacement);
 
 function storeSession(value) {
   token = value;
@@ -132,7 +149,7 @@ function renderWishlistTabs() {
       selectWishlist(list.id);
       clearGifts();
       setBusy(true);
-      showStatus('Opening wishlist…');
+      showOpeningStatus();
       try {
         await loadGifts(true);
         showStatus('');
@@ -272,7 +289,8 @@ function showLocked(shouldFocus = true) {
 function syncAdminControls() {
   const canManage = !!adminToken && managedLists.some(list => list.id === selectedList?.id);
   manage.textContent = adminToken ? 'Exit admin' : 'Manage wishlists';
-  openAddGift.hidden = !canManage;
+  giftAddFooter.hidden = !canManage;
+  updateGiftButtonPlacement();
   editConnectedList.hidden = !canManage;
   removeConnectedList.hidden = !canManage;
   document.querySelectorAll('.gift-admin-actions').forEach(actions => { actions.hidden = !canManage; });
@@ -628,7 +646,7 @@ unlockForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (busy || !endpoint) return;
   setBusy(true);
-  showStatus('Opening wishlist…');
+  showOpeningStatus();
   try {
     const result = await request('unlock', { passphrase: passphrase.value });
     storeSession(result.token);
@@ -669,7 +687,7 @@ async function restoreSession() {
   }
   if (!token) return;
   setBusy(true);
-  showStatus('Opening wishlist…');
+  showOpeningStatus();
   try {
     await openWishlists();
     showStatus('');

@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=12">
-  <script src="./wishlist.js?v=12" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=13">
+  <script src="./wishlist.js?v=13" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -59,7 +59,9 @@
       </section>
     </section>
 
-    <button id="open-add-gift" type="button" aria-haspopup="dialog" aria-controls="wishlist-admin" hidden>Add gift</button>
+    <div id="gift-add-footer" hidden>
+      <button id="open-add-gift" type="button" aria-haspopup="dialog" aria-controls="wishlist-admin">Add gift</button>
+    </div>
   </main>
 
     <dialog id="wishlist-admin" class="panel entry" aria-labelledby="admin-heading">
