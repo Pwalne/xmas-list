@@ -124,8 +124,10 @@ function setBusy(value) {
   addGiftForm.querySelectorAll('input, select').forEach(field => { field.disabled = value; });
   confirmRemoval.disabled = value;
   wishlistTabs.querySelectorAll('button').forEach(button => { button.disabled = value; });
-  available.querySelectorAll('input').forEach(input => { input.disabled = value; });
-  document.querySelectorAll('.gift-admin-actions button').forEach(button => { button.disabled = value; });
+  available.querySelectorAll('input').forEach(input => { input.disabled = value || input.dataset.waitingForId === 'true'; });
+  document.querySelectorAll('.gift-admin-actions button').forEach(button => {
+    button.disabled = value || button.dataset.waitingForId === 'true';
+  });
 }
 
 function selectWishlist(id) {
@@ -249,16 +251,19 @@ function renderGifts() {
     control.hidden = gift.purchased;
     row.querySelector('.purchased-label').hidden = !gift.purchased;
     checkbox.setAttribute('aria-label', 'Purchased: ' + gift.name);
-    checkbox.disabled = busy;
+    checkbox.dataset.waitingForId = String(!gift.id);
+    checkbox.disabled = busy || !gift.id;
+    if (!gift.id) control.title = 'Refresh to enable purchase tracking for this gift.';
     checkbox.addEventListener('change', () => {
       checkbox.checked = false;
-      if (!busy) markPurchased(gift, checkbox);
+      if (!busy && gift.id) markPurchased(gift, checkbox);
     });
     const adminActions = row.querySelector('.gift-admin-actions');
     adminActions.hidden = !adminToken || !selectedManagedList();
     for (const [selector, label, removing] of [['.gift-edit', 'Edit', false], ['.gift-remove', 'Delete', true]]) {
       const button = adminActions.querySelector(selector);
-      button.disabled = busy;
+      button.dataset.waitingForId = String(!gift.id);
+      button.disabled = busy || !gift.id;
       button.setAttribute('aria-label', label + ' ' + gift.name);
       button.title = label + ' gift';
       button.addEventListener('click', () => openGiftAdmin(gift, removing));

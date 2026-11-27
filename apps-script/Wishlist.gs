@@ -69,17 +69,18 @@ function doPost(event) {
         if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
           return wishlistResponse_({ ok: false, code: 'invalid_request' });
         }
-        return wishlistResponse_(withWishlistLock_(() => {
-          const result = unlockWishlist_(
-            request.passphrase, properties, adminPassphrase, adminKey, 'WISHLIST_ADMIN_FAILED_ATTEMPTS', 30 * 60 * 1000
-          );
-          if (!result.ok || !request.includeLists) return result;
-          const directory = manageWishlists_(properties, { action: 'admin_lists' }, adminKey, sessionKey);
-          return directory.ok ? { ...result, lists: directory.lists } : directory;
-        }));
+        const result = withWishlistLock_(() => unlockWishlist_(
+          request.passphrase, properties, adminPassphrase, adminKey, 'WISHLIST_ADMIN_FAILED_ATTEMPTS', 30 * 60 * 1000
+        ), LockService.getUserLock());
+        if (!result.ok || !request.includeLists) return wishlistResponse_(result);
+        const directory = manageWishlists_(properties, { action: 'admin_lists' }, adminKey, sessionKey);
+        return wishlistResponse_(directory.ok ? { ...result, lists: directory.lists } : directory);
       }
       if (!validWishlistToken_(request.adminToken, adminKey, Date.now())) {
         return wishlistResponse_({ ok: false, code: 'admin_session_expired' });
+      }
+      if (['admin_lists', 'admin_open', 'admin_get_gift'].includes(request.action)) {
+        return wishlistResponse_(manageWishlists_(properties, request, adminKey, sessionKey));
       }
       let newGift;
       let batchGifts;
@@ -104,11 +105,10 @@ function doPost(event) {
       if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
         return wishlistResponse_({ ok: false, code: 'invalid_request' });
       }
-      return wishlistResponse_(withWishlistLock_(() => {
-        const result = unlockWishlist_(request.passphrase, properties, passphrase, sessionKey);
-        if (!result.ok || !request.includeView) return result;
-        return { ...result, ...openWishlist_(configuredWishlists_(properties), request.listId, sessionKey) };
-      }));
+      const result = withWishlistLock_(() =>
+        unlockWishlist_(request.passphrase, properties, passphrase, sessionKey), LockService.getUserLock());
+      if (!result.ok || !request.includeView) return wishlistResponse_(result);
+      return wishlistResponse_({ ...result, ...openWishlist_(configuredWishlists_(properties), request.listId, sessionKey) });
     }
     if (!['open', 'directory', 'list', 'purchase'].includes(request.action)) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
@@ -120,7 +120,7 @@ function doPost(event) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
     }
 
-    return wishlistResponse_(withWishlistLock_(() => {
+    const readOrPurchase = () => {
       const lists = configuredWishlists_(properties);
       if (request.action === 'open') return openWishlist_(lists, request.listId, sessionKey);
       if (request.action === 'directory') {
@@ -136,7 +136,8 @@ function doPost(event) {
       if (!sheet) return { ok: false, code: 'list_unavailable' };
       if (request.action === 'purchase') return purchaseWishlistGift_(sheet, request.giftId);
       return { ok: true, gifts: listWishlistGifts_(sheet), listRevision };
-    }));
+    };
+    return wishlistResponse_(request.action === 'purchase' ? withWishlistLock_(readOrPurchase) : readOrPurchase());
   } catch (error) {
     console.error('Wishlist operation failed: ' + error.name);
     return wishlistResponse_({ ok: false, code: 'service_unavailable' });
@@ -147,9 +148,9 @@ function wishlistSourceRevision_(list, sessionKey) {
   return signWishlist_(JSON.stringify([list.id, list.spreadsheetId, list.tab]), sessionKey);
 }
 
-function wishlistView_(list, sessionKey, sheet = wishlistGiftSheet_(list)) {
+function wishlistView_(list, sessionKey, sheet = wishlistGiftSheet_(list), lockHeld = false) {
   if (!sheet) return { ok: false, code: 'list_unavailable' };
-  return { ok: true, gifts: listWishlistGifts_(sheet), listRevision: wishlistSourceRevision_(list, sessionKey) };
+  return { ok: true, gifts: listWishlistGifts_(sheet, lockHeld), listRevision: wishlistSourceRevision_(list, sessionKey) };
 }
 
 function openWishlist_(lists, preferredId, sessionKey) {
@@ -162,9 +163,8 @@ function openWishlist_(lists, preferredId, sessionKey) {
   };
 }
 
-function withWishlistLock_(callback) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return { ok: false, code: 'busy' };
+function withWishlistLock_(callback, lock = LockService.getScriptLock(), wait = 5000) {
+  if (!lock.tryLock(wait)) return { ok: false, code: 'busy' };
   try {
     return callback();
   } finally {
@@ -274,7 +274,7 @@ function manageWishlists_(properties, request, adminKey, sessionKey, newGift, ba
     }
     if (!result.ok || !request.includeView || request.action === 'admin_get_gift') return result;
     try {
-      return { ...result, view: wishlistView_(existing, sessionKey, sheet) };
+      return { ...result, view: wishlistView_(existing, sessionKey, sheet, true) };
     } catch {
       // The mutation was saved. Let the client retry just the read.
       return result;
@@ -344,19 +344,8 @@ function addWishlistGift_(sheet, giftId, gift) {
   const rows = wishlistGiftRows_(sheet);
   if (rows.some(row => row[0] === giftId)) return { ok: true };
 
-  let end = rows.length;
-  while (end && !wishlistRowOccupied_(rows[end - 1])) end--;
-  let row = end + 2;
-  for (;;) {
-    if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
-    const cells = sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length);
-    if (!wishlistRowOccupied_(cells.getValues()[0]) && !cells.getFormulas()[0].some(Boolean)) {
-      cells.setValues([[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]]);
-      SpreadsheetApp.flush();
-      return { ok: true };
-    }
-    row++;
-  }
+  appendWishlistRows_(sheet, rows, [[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]]);
+  return { ok: true };
 }
 
 function validateWishlistGiftBatch_(entries) {
@@ -390,26 +379,28 @@ function addWishlistGifts_(sheet, validated) {
     if (key) seenLinks.add(key);
     additions.push([gift.id, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]);
   }
-  if (additions.length) {
-    let end = rows.length;
-    while (end && !wishlistRowOccupied_(rows[end - 1])) end--;
-    // Keep formulas that appear blank, along with the existing checkbox formatting.
-    let start = end + 2;
-    if (rows.length > end) {
-      const formulas = sheet.getRange(start, 1, rows.length - end, WISHLIST_HEADERS.length).getFormulas();
-      for (let index = formulas.length - 1; index >= 0; index--) {
-        if (!formulas[index].some(Boolean)) continue;
-        start += index + 1;
-        break;
-      }
-    }
-    const maxRows = sheet.getMaxRows();
-    const extra = start + additions.length - 1 - maxRows;
-    if (extra > 0) sheet.insertRowsAfter(maxRows, extra);
-    sheet.getRange(start, 1, additions.length, WISHLIST_HEADERS.length).setValues(additions);
-    SpreadsheetApp.flush();
-  }
+  if (additions.length) appendWishlistRows_(sheet, rows, additions);
   return { ok: true, added: additions.length, skipped: validated.length - additions.length };
+}
+
+function appendWishlistRows_(sheet, rows, additions) {
+  let end = rows.length;
+  while (end && !wishlistRowOccupied_(rows[end - 1])) end--;
+  // Keep formulas that appear blank, along with the existing checkbox formatting.
+  let start = end + 2;
+  if (rows.length > end) {
+    const formulas = sheet.getRange(start, 1, rows.length - end, WISHLIST_HEADERS.length).getFormulas();
+    for (let index = formulas.length - 1; index >= 0; index--) {
+      if (!formulas[index].some(Boolean)) continue;
+      start += index + 1;
+      break;
+    }
+  }
+  const maxRows = sheet.getMaxRows();
+  const extra = start + additions.length - 1 - maxRows;
+  if (extra > 0) sheet.insertRowsAfter(maxRows, extra);
+  sheet.getRange(start, 1, additions.length, WISHLIST_HEADERS.length).setValues(additions);
+  SpreadsheetApp.flush();
 }
 
 function editWishlistGift_(sheet, listId, request, adminKey) {
@@ -630,20 +621,22 @@ function wishlistGiftRows_(sheet) {
   return count < 1 ? [] : sheet.getRange(2, 1, count, WISHLIST_HEADERS.length).getValues();
 }
 
-function listWishlistGifts_(sheet) {
+function listWishlistGifts_(sheet, lockHeld = false) {
   const rows = wishlistGiftRows_(sheet);
   const gifts = [];
   const existingIds = new Set(rows.map(row => row[0]).filter(validWishlistId_));
   const seenIds = new Set();
-  let wroteToSheet = false;
+  const repairs = [];
   rows.forEach(([id, value, link, priority, purchased, price], index) => {
     const { name, url } = wishlistGiftDetails_(value, link);
     if (!name) return;
     if (!validWishlistId_(id) || seenIds.has(id)) {
-      do { id = Utilities.getUuid(); } while (existingIds.has(id));
-      existingIds.add(id);
-      sheet.getRange(index + 2, 1).setValue(id);
-      wroteToSheet = true;
+      id = null;
+      if (lockHeld) {
+        do { id = Utilities.getUuid(); } while (existingIds.has(id));
+        existingIds.add(id);
+      }
+      repairs.push({ index, id });
     }
     seenIds.add(id);
     const rank = PRIORITIES[String(priority).trim().toLowerCase()];
@@ -657,7 +650,22 @@ function listWishlistGifts_(sheet) {
       order: index,
     });
   });
-  if (wroteToSheet) SpreadsheetApp.flush();
+  if (repairs.length && !lockHeld) {
+    // Re-read under the lock before touching IDs. Valid gifts stay visible if a write is in progress.
+    const result = withWishlistLock_(() => listWishlistGifts_(sheet, true), LockService.getScriptLock(), 0);
+    if (Array.isArray(result)) return result;
+  }
+  if (repairs.length && lockHeld) {
+    let first = 0;
+    while (first < repairs.length) {
+      let end = first + 1;
+      while (end < repairs.length && repairs[end].index === repairs[end - 1].index + 1) end++;
+      sheet.getRange(repairs[first].index + 2, 1, end - first, 1)
+        .setValues(repairs.slice(first, end).map(repair => [repair.id]));
+      first = end;
+    }
+    SpreadsheetApp.flush();
+  }
   gifts.sort((left, right) =>
     Number(left.purchased) - Number(right.purchased) ||
     (left.purchased ? 0 : left.priority - right.priority) ||
