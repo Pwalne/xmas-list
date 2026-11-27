@@ -80,7 +80,7 @@ h3 { font-size: 1.37rem; }
 .entry form { margin-top: 1.3rem; }
 .entry label { display: block; margin-bottom: .35rem; font-size: .9rem; font-weight: 650; }
 .entry-fields { display: flex; gap: .65rem; }
-input[type="password"], #add-wishlist input {
+input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
   width: 100%;
   min-width: 0;
   border: 1px solid #aebdb0;
@@ -91,7 +91,10 @@ input[type="password"], #add-wishlist input {
   font: inherit;
 }
 
-#add-wishlist input { margin-bottom: .75rem; }
+#add-wishlist input, #add-gift input, #add-gift select { margin-bottom: .75rem; }
+#add-gift p { margin: .35rem 0 .85rem; }
+.gift-form-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+#manage-list-controls { margin-top: 1rem; }
 #wishlist-form-heading { margin: .75rem 0; }
 #remove-wishlist-dialog {
   max-width: min(28rem, calc(100% - 2rem));
@@ -129,8 +132,8 @@ button:disabled { opacity: .6; cursor: default; }
 .status { margin: .7rem 0 0; min-height: 0; color: #385b49; }
 .status:empty { display: none; }
 .status.error { color: #942e3e; }
-#wishlist-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
-#wishlist-tabs button[aria-pressed="true"] { background: #244f3c; color: #fff; }
+#wishlist-tabs, .wishlist-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+:is(#wishlist-tabs, .wishlist-tabs) button[aria-pressed="true"] { background: #244f3c; color: #fff; }
 .list-header, .actions { display: flex; align-items: center; gap: .5rem; }
 .list-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: .85rem; }
 .gift-list { list-style: none; margin: 0; padding: 0; }

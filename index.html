@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=9">
-  <script src="./wishlist.js?v=9" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=10">
+  <script src="./wishlist.js?v=10" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -66,8 +66,38 @@
           <button type="submit">Unlock settings</button>
         </div>
       </form>
+      <nav id="managed-wishlists" class="wishlist-tabs" aria-label="Manage spreadsheet tabs" hidden></nav>
       <div id="manage-list-controls" hidden>
-        <ul id="managed-wishlists" class="gift-list" aria-label="Connected wishlists"></ul>
+        <div class="list-header">
+          <h3 id="managed-list-heading"></h3>
+          <div class="actions">
+            <button id="edit-connected-list" class="secondary" type="button">Edit</button>
+            <button id="remove-connected-list" class="secondary" type="button">Remove</button>
+          </div>
+        </div>
+        <form id="add-gift">
+          <h3>Add a gift</h3>
+          <p>Enter a gift name or paste a shopping link.</p>
+          <label for="new-gift-name">Gift name</label>
+          <input id="new-gift-name" name="name" type="text" maxlength="200">
+          <label for="new-gift-link">Shopping link</label>
+          <input id="new-gift-link" name="link" type="url" maxlength="500">
+          <div class="gift-form-fields">
+            <div>
+              <label for="new-gift-priority">Priority</label>
+              <select id="new-gift-priority" name="priority">
+                <option>High</option>
+                <option selected>Normal</option>
+                <option>Low</option>
+              </select>
+            </div>
+            <div>
+              <label for="new-gift-price">Price in USD</label>
+              <input id="new-gift-price" name="price" type="number" min="0" max="999999999.99" step=".01" inputmode="decimal">
+            </div>
+          </div>
+          <button type="submit">Add gift</button>
+        </form>
       </div>
       <form id="add-wishlist" hidden>
         <h3 id="wishlist-form-heading">Add a wishlist</h3>

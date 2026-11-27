@@ -20,6 +20,10 @@ const addListForm = document.querySelector('#add-wishlist');
 const adminStatus = document.querySelector('#admin-status');
 const manageListControls = document.querySelector('#manage-list-controls');
 const managedWishlists = document.querySelector('#managed-wishlists');
+const managedListHeading = document.querySelector('#managed-list-heading');
+const editConnectedList = document.querySelector('#edit-connected-list');
+const removeConnectedList = document.querySelector('#remove-connected-list');
+const addGiftForm = document.querySelector('#add-gift');
 const wishlistFormHeading = document.querySelector('#wishlist-form-heading');
 const saveWishlist = document.querySelector('#save-wishlist');
 const cancelWishlistEdit = document.querySelector('#cancel-wishlist-edit');
@@ -43,6 +47,8 @@ let listRevision;
 let busy = false;
 let adminToken = '';
 let editingList = null;
+let managedList = null;
+let pendingGiftId;
 let removingList = null;
 let lists = [];
 let selectedList = null;
@@ -57,6 +63,7 @@ const errors = {
   admin_unavailable: 'Wishlist administration hasn’t been configured.',
   admin_session_expired: 'Admin access expired. Enter the admin passphrase again.',
   invalid_list_settings: 'Enter a child name, a valid Google Sheet link or ID if needed, and the exact gift tab name.',
+  invalid_gift: 'Enter a gift name or a valid shopping link, and a nonnegative price with up to two decimal places if needed.',
   list_already_added: 'That gift tab is already connected.',
   list_changed: 'This wishlist changed since you opened settings. Close and reopen settings, then try again.',
 };
@@ -83,6 +90,7 @@ function setBusy(value) {
   refresh.disabled = value;
   manage.disabled = value;
   adminPanel.querySelectorAll('button').forEach(button => { button.disabled = value; });
+  addGiftForm.querySelectorAll('input, select').forEach(field => { field.disabled = value; });
   confirmRemoval.disabled = value;
   wishlistTabs.querySelectorAll('button').forEach(button => { button.disabled = value; });
   available.querySelectorAll('input').forEach(input => { input.disabled = value; });
@@ -239,8 +247,7 @@ function closeAdmin() {
   adminForm.reset();
   addListForm.hidden = true;
   resetWishlistForm();
-  manageListControls.hidden = true;
-  managedWishlists.replaceChildren();
+  clearManagedWishlists();
   adminStatus.textContent = '';
   manage.setAttribute('aria-expanded', 'false');
 }
@@ -263,7 +270,7 @@ function reportAdminError(error, fallback) {
   if (error.message === 'admin_session_expired') {
     adminToken = '';
     addListForm.hidden = true;
-    manageListControls.hidden = true;
+    clearManagedWishlists();
     resetWishlistForm();
     adminForm.hidden = false;
     adminPassphrase.focus();
@@ -279,10 +286,8 @@ adminForm.addEventListener('submit', async event => {
   try {
     const result = await request('admin_unlock', { passphrase: adminPassphrase.value });
     adminToken = result.token;
-    await refreshManagedWishlists();
+    await refreshManagedWishlists(selectedList?.id);
     adminForm.hidden = true;
-    addListForm.hidden = false;
-    addListForm.elements.name.focus();
     adminStatus.textContent = '';
   } catch (error) {
     reportAdminError(error, 'Couldn’t unlock settings. Try again.');
@@ -300,58 +305,116 @@ function resetWishlistForm() {
   cancelWishlistEdit.hidden = true;
 }
 
-cancelWishlistEdit.addEventListener('click', () => {
+function clearManagedWishlists() {
+  managedList = null;
+  pendingGiftId = undefined;
+  addGiftForm.reset();
+  manageListControls.hidden = true;
+  managedWishlists.replaceChildren();
+  managedWishlists.hidden = true;
+}
+
+function selectManagedWishlist(list) {
+  managedList = list;
+  pendingGiftId = undefined;
+  addGiftForm.reset();
   resetWishlistForm();
+  manageListControls.hidden = !list;
+  addListForm.hidden = !!list;
+  managedListHeading.textContent = list?.name || '';
+  managedWishlists.querySelectorAll('button').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.listId === (list?.id || '')));
+  });
+}
+
+cancelWishlistEdit.addEventListener('click', () => {
+  selectManagedWishlist(managedList);
+  editConnectedList.focus();
+});
+
+editConnectedList.addEventListener('click', () => {
+  if (!managedList || !adminToken || busy) return;
+  editingList = managedList;
+  addListForm.elements.name.value = editingList.name;
+  addListForm.elements.source.value = editingList.source;
+  addListForm.elements.tab.value = editingList.tab;
+  wishlistFormHeading.textContent = 'Edit wishlist';
+  saveWishlist.textContent = 'Save changes';
+  cancelWishlistEdit.hidden = false;
+  manageListControls.hidden = true;
+  addListForm.hidden = false;
+  adminStatus.textContent = '';
   addListForm.elements.name.focus();
 });
 
-async function refreshManagedWishlists() {
+removeConnectedList.addEventListener('click', () => {
+  if (!managedList || !adminToken || busy) return;
+  removingList = managedList;
+  removeMessage.textContent = 'Remove ' + removingList.name + ' from the website? Its Google Sheet and gifts will be kept.';
+  removeDialog.showModal();
+});
+
+async function refreshManagedWishlists(preferredId = managedList?.id) {
   const { lists: connectedLists } = await request('admin_lists', { adminToken });
   managedWishlists.replaceChildren();
-  for (const list of connectedLists) {
-    const row = document.createElement('li');
-    row.className = 'gift-row';
-    const name = document.createElement('strong');
-    name.textContent = list.name;
-    const actions = document.createElement('div');
-    actions.className = 'actions';
-    for (const label of ['Edit', 'Remove']) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'secondary';
-      button.textContent = label;
-      button.setAttribute('aria-label', label + ' ' + list.name);
-      button.addEventListener('click', () => {
-        if (busy || !adminToken) return;
-        if (label === 'Edit') {
-          editingList = list;
-          addListForm.elements.name.value = list.name;
-          addListForm.elements.source.value = list.source;
-          addListForm.elements.tab.value = list.tab;
-          wishlistFormHeading.textContent = 'Edit wishlist';
-          saveWishlist.textContent = 'Save changes';
-          cancelWishlistEdit.hidden = false;
-          adminStatus.textContent = '';
-          addListForm.elements.name.focus();
-        } else {
-          removingList = list;
-          removeMessage.textContent = 'Remove ' + list.name + ' from the website? Its Google Sheet and gifts will be kept.';
-          removeDialog.showModal();
-        }
-      });
-      actions.append(button);
+  for (const list of [...connectedLists, null]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'secondary';
+    button.dataset.listId = list?.id || '';
+    button.textContent = list?.name || '+';
+    if (!list) {
+      button.setAttribute('aria-label', 'Connect a spreadsheet');
+      button.title = 'Connect a spreadsheet';
     }
-    row.append(name, actions);
-    managedWishlists.append(row);
+    button.addEventListener('click', () => {
+      if (busy || !adminToken || (managedList?.id === list?.id && !editingList)) return;
+      selectManagedWishlist(list);
+      adminStatus.textContent = '';
+      if (!list) addListForm.elements.name.focus();
+    });
+    managedWishlists.append(button);
   }
-  manageListControls.hidden = !connectedLists.length;
+  managedWishlists.hidden = false;
+  selectManagedWishlist(connectedLists.find(list => list.id === preferredId) || connectedLists[0] || null);
 }
 
-async function refreshAfterManage(message) {
+addGiftForm.addEventListener('input', () => { pendingGiftId = undefined; });
+addGiftForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (busy || !adminToken || !managedList) return;
+  const list = managedList;
+  const fields = Object.fromEntries(new FormData(addGiftForm));
+  pendingGiftId ||= crypto.randomUUID();
+  setBusy(true);
+  adminStatus.textContent = 'Adding gift…';
+  try {
+    await request('admin_add_gift', {
+      ...fields, adminToken, listId: list.id, previous: JSON.stringify(list), giftId: pendingGiftId,
+    });
+    pendingGiftId = undefined;
+    addGiftForm.reset();
+    const message = 'Gift added to ' + list.name + '.';
+    adminStatus.textContent = message;
+    if (selectedList?.id === list.id) {
+      try {
+        await loadGifts();
+      } catch (error) {
+        reportAdminError(error, message + ' Use Refresh to load the updated list.');
+      }
+    }
+  } catch (error) {
+    reportAdminError(error, 'Couldn’t add the gift. Try again.');
+  } finally {
+    setBusy(false);
+  }
+});
+
+async function refreshAfterManage(message, listId) {
   adminStatus.textContent = message;
   try {
     await openWishlists();
-    await refreshManagedWishlists();
+    await refreshManagedWishlists(listId);
   } catch (error) {
     reportAdminError(error, message + ' Reload to refresh the displayed lists.');
   }
@@ -387,7 +450,7 @@ addListForm.addEventListener('submit', async event => {
       listId: previous?.id, previous: previous ? JSON.stringify(previous) : undefined,
     });
     resetWishlistForm();
-    await refreshAfterManage(previous ? 'Saved changes to ' + list.name + '.' : 'Added ' + list.name + ' to the wishlist tabs.');
+    await refreshAfterManage(previous ? 'Saved changes to ' + list.name + '.' : 'Added ' + list.name + ' to the wishlist tabs.', list.id);
   } catch (error) {
     const fallback = error.message === 'list_unavailable'
       ? 'Check the tab name, gift column headers, and Google Sheet sharing.'

@@ -30,9 +30,15 @@ enter it manually in **Price**.
 ## Adding a child's wishlist
 
 On the website, unlock the family wishlist, then use **Manage wishlists**
-and enter the separate admin passphrase. Supply the child name, the Google
-Sheet link or ID if it is a separate workbook, and the exact gift tab name.
-The site checks the gift tab and assigns a List ID for you.
+and enter the separate admin passphrase. Use the **+** tab to connect a
+spreadsheet. Supply the child name, the Google Sheet link or ID if it is a
+separate workbook, and the exact gift tab name. The site checks the gift
+tab and assigns a List ID for you.
+
+Select a spreadsheet's tab in **Manage wishlists** to add gifts to it.
+Enter a gift name or shopping link, with an optional priority and price.
+The site assigns the Gift ID. The admin passphrase is required to add gifts
+or change connected spreadsheets through the site.
 Use **Edit** to change a connected child's name, spreadsheet, or gift tab.
 Use **Remove** to disconnect a list from the website. The source spreadsheet
 and its gifts stay in Google Sheets.
