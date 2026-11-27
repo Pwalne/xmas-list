@@ -43,9 +43,6 @@ const priceFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency
 const targetProductPhotos = new Map([
   ['92538311', 'https://target.scene7.com/is/image/Target/GUEST_d3e5d017-e003-4bdf-b379-d1516216de06?fmt=pjpeg&hei=300&wid=300'],
 ]);
-const amazonProductPhotos = new Map([
-  ['B09XHGG4B8', 'https://m.media-amazon.com/images/I/81txzveWX4L._AC_SX300_.jpg'],
-]);
 
 let token = '';
 let gifts = [];
@@ -222,10 +219,6 @@ function productPhoto(shoppingLink) {
     const id = url.pathname.match(/^\/p\/.*\/A-(\d+)\/?$/i)?.[1];
     return targetProductPhotos.get(id) || '';
   }
-  if (url.hostname === 'www.amazon.com' || url.hostname === 'amazon.com') {
-    const id = url.pathname.match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:\/|$)/i)?.[1];
-    return amazonProductPhotos.get(id?.toUpperCase()) || '';
-  }
   return '';
 }
 
@@ -247,7 +240,7 @@ function renderGifts() {
       link.href = url;
       link.setAttribute('aria-label', 'Buy Now: ' + gift.name);
       link.hidden = false;
-      const photoUrl = productPhoto(url);
+      const photoUrl = gift.imageUrl || productPhoto(url);
       if (photoUrl) {
         const photo = row.querySelector('.gift-photo');
         photo.addEventListener('error', () => { photo.hidden = true; }, { once: true });

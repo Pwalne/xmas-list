@@ -1,4 +1,5 @@
 const WISHLIST_HEADERS = ['Gift ID', 'Gift name', 'Shopping link', 'Priority', 'Purchased', 'Price'];
+const WISHLIST_PHOTO_HEADER = 'Product photo URL';
 const PRIORITIES = { high: 0, normal: 1, low: 2 };
 const SESSION_LIFETIME_MS = 4 * 60 * 60 * 1000;
 const ATTEMPT_WINDOW_MS = 2 * 60 * 1000;
@@ -84,7 +85,7 @@ function doPost(event) {
       }
       let newGift;
       let batchGifts;
-      if (request.action === 'admin_edit_gift' && amazonShortProductUrl_(request.link)) {
+      if (request.action === 'admin_edit_gift' && (amazonShortProductUrl_(request.link) || wishlistProductUrl_(request.link))) {
         newGift = wishlistGiftInput_(request);
         if (!newGift) return wishlistResponse_({ ok: false, code: 'invalid_gift' });
         fillWishlistProductDetails_([newGift]);
@@ -349,7 +350,7 @@ function addWishlistGift_(sheet, giftId, gift) {
   const rows = wishlistGiftRows_(sheet);
   if (rows.some(row => row[0] === giftId)) return { ok: true };
 
-  appendWishlistRows_(sheet, rows, [[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]]);
+  appendWishlistRows_(sheet, rows, [[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]], [gift.imageUrl]);
   return { ok: true };
 }
 
@@ -378,17 +379,19 @@ function addWishlistGifts_(sheet, validated) {
   const linkKey = link => wishlistProductUrl_(link) || String(link).trim();
   const seenLinks = new Set(rows.map(([, , link]) => linkKey(link)).filter(Boolean));
   const additions = [];
+  const photos = [];
   for (const gift of validated) {
     const key = linkKey(gift.link);
     if (knownIds.has(gift.id) || (key && seenLinks.has(key))) continue;
     if (key) seenLinks.add(key);
     additions.push([gift.id, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]);
+    photos.push(gift.imageUrl);
   }
-  if (additions.length) appendWishlistRows_(sheet, rows, additions);
+  if (additions.length) appendWishlistRows_(sheet, rows, additions, photos);
   return { ok: true, added: additions.length, skipped: validated.length - additions.length };
 }
 
-function appendWishlistRows_(sheet, rows, additions) {
+function appendWishlistRows_(sheet, rows, additions, photos) {
   let end = rows.length;
   while (end && !wishlistRowOccupied_(rows[end - 1])) end--;
   // Keep formulas that appear blank, along with the existing checkbox formatting.
@@ -405,6 +408,10 @@ function appendWishlistRows_(sheet, rows, additions) {
   const extra = start + additions.length - 1 - maxRows;
   if (extra > 0) sheet.insertRowsAfter(maxRows, extra);
   sheet.getRange(start, 1, additions.length, WISHLIST_HEADERS.length).setValues(additions);
+  if (photos.some(Boolean)) {
+    const column = wishlistPhotoColumn_(sheet, true);
+    sheet.getRange(start, column, photos.length, 1).setValues(photos.map(photo => [photo || '']));
+  }
   SpreadsheetApp.flush();
 }
 
@@ -429,6 +436,8 @@ function editWishlistGift_(sheet, listId, request, adminKey, preparedGift) {
   if (request.revision !== revision) return { ok: false, code: 'gift_changed' };
   if (request.action === 'admin_remove_gift') {
     cells.clearContent();
+    const column = wishlistPhotoColumn_(sheet);
+    if (column) sheet.getRange(cells.getRow(), column).clearContent();
   } else {
     const gift = preparedGift || wishlistGiftInput_(request);
     if (!gift) return { ok: false, code: 'invalid_gift' };
@@ -439,6 +448,12 @@ function editWishlistGift_(sheet, listId, request, adminKey, preparedGift) {
       ? formulas[i] || (typeof value === 'string' ? literalGiftText_(value) : value)
       : typeof replacements[i] === 'string' ? literalGiftText_(replacements[i]) : replacements[i]);
     cells.setValues([updated]);
+    const sameProduct = link === gift.link || link === request.link ||
+      (wishlistProductUrl_(gift.link) && wishlistProductUrl_(link) === wishlistProductUrl_(gift.link));
+    if (gift.imageUrl || !sameProduct) {
+      const column = wishlistPhotoColumn_(sheet, !!gift.imageUrl);
+      if (column) sheet.getRange(cells.getRow(), column).setValue(gift.imageUrl || '');
+    }
   }
   SpreadsheetApp.flush();
   return { ok: true };
@@ -476,6 +491,28 @@ function isWishlistSheet_(sheet) {
   if (sheet.getMaxColumns() < WISHLIST_HEADERS.length) return false;
   const headers = sheet.getRange(1, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
   return WISHLIST_HEADERS.every((header, index) => header === headers[index]);
+}
+
+function wishlistPhotoColumn_(sheet, create = false) {
+  const base = WISHLIST_HEADERS.length;
+  const last = sheet.getLastColumn();
+  const index = last > base
+    ? sheet.getRange(1, base + 1, 1, last - base).getValues()[0].indexOf(WISHLIST_PHOTO_HEADER)
+    : -1;
+  if (index >= 0) return base + 1 + index;
+  if (!create) return 0;
+  const max = sheet.getMaxColumns();
+  // Existing empty columns can carry the owner's validation rules.
+  sheet.insertColumnsAfter(max, 1);
+  sheet.getRange(1, max + 1, sheet.getMaxRows(), 1).clearDataValidations();
+  sheet.getRange(1, max + 1).setValue(WISHLIST_PHOTO_HEADER);
+  return max + 1;
+}
+
+function wishlistProductPhotoUrl_(value) {
+  const url = typeof value === 'string' ? value.trim() : '';
+  return /^https:\/\/(?:m\.media-amazon\.com|images-na\.ssl-images-amazon\.com|target\.scene7\.com)\/[^\s"'<>\\]+$/i.test(url)
+    && url.length <= 1500 ? url : '';
 }
 
 function validWishlistId_(id) {
@@ -537,12 +574,12 @@ function resolveAmazonShortProducts_(gifts) {
 
 function fillWishlistProductDetails_(gifts) {
   resolveAmazonShortProducts_(gifts);
-  const missing = gifts.filter(gift => !gift.name || gift.price === '');
+  const missing = gifts.filter(gift => !gift.name || gift.price === '' || !gift.imageUrl);
   const urls = [...new Set(missing.map(gift => wishlistProductUrl_(gift.link)).filter(Boolean))];
   if (!urls.length) return;
 
   const details = new Map();
-  const cacheKey = url => (url.startsWith('https://www.amazon.com/') ? 'amazon-product:' : 'product:') + url;
+  const cacheKey = url => 'product-photo:' + url;
   try {
     const cache = CacheService.getScriptCache();
     const cached = cache.getAll(urls.map(cacheKey));
@@ -573,6 +610,7 @@ function fillWishlistProductDetails_(gifts) {
     if (!product) continue;
     if (!gift.name && product.name) gift.name = product.name;
     if (gift.price === '' && product.price != null) gift.price = product.price;
+    if (!gift.imageUrl && product.imageUrl) gift.imageUrl = product.imageUrl;
   }
 }
 
@@ -593,6 +631,11 @@ function parseAmazonWishlistProduct_(html) {
   if (!title) return {};
   const name = wishlistProductTitle_(title[1]);
   const result = name ? { name } : {};
+  const image = html.match(/<img\b[^>]*\sid=["']landingImage["'][^>]*>/i)?.[0];
+  const source = image?.match(/\sdata-old-hires=["']([^"']+)["']/i)?.[1]
+    || image?.match(/\ssrc=["']([^"']+)["']/i)?.[1];
+  const imageUrl = wishlistProductPhotoUrl_(source?.replace(/&amp;/g, '&'));
+  if (imageUrl) result.imageUrl = imageUrl;
   const prices = new Set();
   for (const [, raw] of html.matchAll(/<span\b[^>]*\bclass=["'](?:[^"']*\s)?apex-pricetopay-value(?:\s[^"']*)?["'][^>]*>\s*<span\b[^>]*\bclass=["']a-offscreen["'][^>]*>\s*\$((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})\s*<\/span>/gi)) {
     prices.add(Number(raw.replace(/,/g, '')));
@@ -643,6 +686,10 @@ function parseWishlistProduct_(html, url = '') {
   if (!productPage) return fallback;
   const name = wishlistProductTitle_(product?.name || one(metadata.get('og:title'))) || fallback.name;
   if (name) result.name = name;
+  const imageUrl = [product?.image].flat().map(value => wishlistProductPhotoUrl_(
+    typeof value === 'string' ? value : value?.url || value?.contentUrl
+  )).find(Boolean) || fallback.imageUrl || wishlistProductPhotoUrl_(one(metadata.get('og:image')));
+  if (imageUrl) result.imageUrl = imageUrl;
 
   const usdPrice = (amount, currency) =>
     currency === 'USD' && /^\d+(?:\.\d{1,2})?$/.test(String(amount).trim()) && Number.isFinite(Number(amount))
@@ -695,6 +742,8 @@ function wishlistGiftRows_(sheet) {
 
 function listWishlistGifts_(sheet, lockHeld = false) {
   const rows = wishlistGiftRows_(sheet);
+  const photoColumn = rows.length ? wishlistPhotoColumn_(sheet) : 0;
+  const photos = photoColumn ? sheet.getRange(2, photoColumn, rows.length, 1).getValues() : [];
   const gifts = [];
   const existingIds = new Set(rows.map(row => row[0]).filter(validWishlistId_));
   const seenIds = new Set();
@@ -718,6 +767,7 @@ function listWishlistGifts_(sheet, lockHeld = false) {
       url,
       purchased: purchased === true,
       price: Number.isFinite(price) && price >= 0 ? price : null,
+      imageUrl: wishlistProductPhotoUrl_(photos[index]?.[0]),
       priority: typeof rank === 'number' ? rank : PRIORITIES.normal,
       order: index,
     });
@@ -742,7 +792,7 @@ function listWishlistGifts_(sheet, lockHeld = false) {
     Number(left.purchased) - Number(right.purchased) ||
     (left.purchased ? 0 : left.priority - right.priority) ||
     left.order - right.order);
-  return gifts.map(({ id, name, url, purchased, price }) => ({ id, name, url, purchased, price }));
+  return gifts.map(({ id, name, url, purchased, price, imageUrl }) => ({ id, name, url, purchased, price, imageUrl }));
 }
 
 function findWishlistGift_(sheet, id) {
