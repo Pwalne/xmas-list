@@ -185,7 +185,7 @@ function renderGifts() {
     const url = shoppingUrl(gift.url);
     if (url) {
       link.href = url;
-      link.setAttribute('aria-label', 'Shopping link for ' + gift.name);
+      link.setAttribute('aria-label', 'Buy Now: ' + gift.name);
       link.hidden = false;
       const photoUrl = productPhoto(url);
       if (photoUrl) {

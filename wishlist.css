@@ -106,7 +106,7 @@ input[type="password"], #add-wishlist input {
 #sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
 .actions { flex-wrap: wrap; }
 
-button {
+button, .shop-link {
   flex: none;
   min-height: 2.75rem;
   border: 1px solid #244f3c;
@@ -120,7 +120,7 @@ button {
   cursor: pointer;
 }
 
-button:hover:enabled { background: #173e2d; }
+button:hover:enabled, .shop-link:hover { background: #173e2d; }
 button.secondary { background: transparent; border-color: #c4d1c3; color: #244f3c; }
 button.secondary:hover:enabled { background: #ecf2e9; }
 button:disabled { opacity: .6; cursor: default; }
@@ -146,8 +146,17 @@ button:disabled { opacity: .6; cursor: default; }
 .gift-details { display: flex; align-items: center; gap: .8rem; }
 .gift-details > div { min-width: 0; }
 .gift-photo { flex: none; width: 4.5rem; height: 4.5rem; object-fit: contain; border-radius: .45rem; background: #fff; }
-.gift-name, .shop-link { display: block; }
-.shop-link { width: fit-content; margin-top: .14rem; color: #295a42; font-size: .9rem; }
+.gift-name { display: block; }
+.shop-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-width: 7rem;
+  margin-top: .45rem;
+  font-size: 1rem;
+  text-decoration: none;
+}
 .purchase-control { display: flex; flex: none; align-items: center; gap: .43rem; min-height: 2.75rem; cursor: pointer; }
 .purchase-control input { width: 1.25rem; height: 1.25rem; margin: 0; accent-color: #244f3c; }
 .purchased-label { color: #52695a; font-size: .9rem; }
