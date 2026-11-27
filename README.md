@@ -9,8 +9,8 @@ a separate Google spreadsheet maintained by another family.
 
 In the wishlist's tab, enter a gift name or an HTTP or HTTPS shopping link,
 and an optional **High**, **Normal**, or **Low** priority. When the name is
-blank, the site uses a name from the product URL when available, or shows
-the store's hostname. Enter a name to override what the site displays. Leave
+blank, the site can use the title from a supported product page. Otherwise it
+uses the product URL or the store's hostname. Leave
 the **Gift ID** alone. The wishlist assigns it automatically. Available gifts
 appear in priority order, with Sheet row order breaking ties. Sort or move full
 rows to keep the IDs, gifts, and checkmarks together.
@@ -19,8 +19,13 @@ Clear the Sheet's **Purchased** checkbox to undo an accidental purchase. Shopper
 see gift additions, edits, and checkmark resets the next time they load or refresh
 the list.
 
-Enter an optional US-dollar amount in **Price**. The site displays the saved
-amount until you update it in the Sheet. A blank price is hidden.
+When a wishlist is opened, the app looks up blank gift names and prices for
+direct Amazon.com and Target product links. It saves the product title and an
+unambiguous US-dollar price when the retailer makes them available. The
+lookup runs in small batches, so additional rows may fill in after refreshing.
+The app preserves existing values and formulas. It does not keep saved prices
+in sync with the store. If a retailer blocks the lookup or omits the price,
+enter it manually in **Price**.
 
 ## Adding a child's wishlist
 
@@ -69,6 +74,7 @@ or lock the wishlist.
    ID as `WISHLIST_SPREADSHEET_ID` and the shared passphrase as
    `WISHLIST_PASSPHRASE`. Run `setupWishlist` in the editor to
    verify the headers and create the signing key. Approve access if Google asks.
+   Product lookups require authorization for external requests.
 4. Deploy a **Web app** that executes as the owner and allows **Anyone** to
    reach the passphrase prompt. Put the published URL ending in `/exec` in the
    `wishlist-endpoint` meta tag in [index.html](index.html). Publish the repository

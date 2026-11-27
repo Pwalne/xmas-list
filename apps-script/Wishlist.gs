@@ -89,6 +89,7 @@ function doPost(event) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
     }
 
+    const metadata = request.action === 'list' ? loadWishlistProductMetadata_(properties, request.listId) : new Map();
     return wishlistResponse_(withWishlistLock_(() => {
       const lists = configuredWishlists_(properties);
       if (request.action === 'directory') {
@@ -103,7 +104,7 @@ function doPost(event) {
       const sheet = wishlistGiftSheet_(list);
       if (!sheet) return { ok: false, code: 'list_unavailable' };
       if (request.action === 'purchase') return purchaseWishlistGift_(sheet, request.giftId);
-      return { ok: true, gifts: listWishlistGifts_(sheet), listRevision };
+      return { ok: true, gifts: listWishlistGifts_(sheet, metadata), listRevision };
     }));
   } catch (error) {
     console.error('Wishlist operation failed: ' + error.name);
@@ -276,13 +277,133 @@ function validWishlistId_(id) {
   return typeof id === 'string' && /^[a-z0-9_-]{1,80}$/i.test(id);
 }
 
+function wishlistProductUrl_(link) {
+  const url = String(link).trim();
+  const target = url.match(/^https?:\/\/(?:www\.)?target\.com\/p\/(?:[^/?#\s\\]+\/)*A-(\d{6,12})\/?(?:[?#]|$)/i);
+  if (target) return 'https://www.target.com/p/-/A-' + target[1];
+  const amazon = url.match(/^https?:\/\/(?:www\.)?amazon\.com\/(?:[^/?#\s\\]+\/)*(?:dp|gp\/product)\/([a-z0-9]{10})\/?(?:[/?#]|$)/i);
+  if (amazon) return 'https://www.amazon.com/dp/' + amazon[1].toUpperCase();
+  return '';
+}
+
+function loadWishlistProductMetadata_(properties, listId) {
+  const lists = configuredWishlists_(properties);
+  const list = lists.get(listId ?? (lists.size === 1 ? lists.keys().next().value : ''));
+  const sheet = list && wishlistGiftSheet_(list);
+  const found = new Map();
+  if (!sheet) return found;
+
+  const urls = [...new Set(wishlistGiftRows_(sheet)
+    .filter(([, name, , , , price]) => !String(name).trim() || price === '')
+    .map(([, , link]) => wishlistProductUrl_(link)).filter(Boolean))];
+  if (!urls.length) return found;
+
+  try {
+    const cache = CacheService.getScriptCache();
+    const pending = [];
+    const keys = urls.map(url => 'product:' + url);
+    // Limit each cache call as well as the number of outbound requests.
+    for (let start = 0; start < urls.length; start += 100) {
+      const cached = cache.getAll(keys.slice(start, start + 100));
+      for (const url of urls.slice(start, start + 100)) {
+        const value = cached['product:' + url];
+        if (value) found.set(url, JSON.parse(value));
+        else if (pending.length < 4) pending.push(url);
+      }
+    }
+    if (pending.length) {
+      let responses;
+      try {
+        responses = UrlFetchApp.fetchAll(pending.map(url => ({
+          url, followRedirects: false, muteHttpExceptions: true, timeoutSeconds: 5,
+        })));
+      } catch {
+        pending.forEach(url => cache.put('product:' + url, '{}', 600));
+        return found;
+      }
+      pending.forEach((url, index) => {
+        const response = responses[index];
+        const details = response.getResponseCode() === 200
+          ? parseWishlistProduct_(response.getContentText().slice(0, 2000000))
+          : {};
+        cache.put('product:' + url, JSON.stringify(details), 21600);
+        found.set(url, details);
+      });
+    }
+  } catch {
+    // Product lookups are optional. The normal list remains usable.
+  }
+  return found;
+}
+
+function parseWishlistProduct_(html) {
+  const products = [];
+  function collect(node, depth = 0) {
+    if (!node || typeof node !== 'object' || depth > 8) return;
+    if (Array.isArray(node)) {
+      node.forEach(item => collect(item, depth + 1));
+      return;
+    }
+    if ([node['@type']].flat().some(type => /^(?:https?:\/\/schema\.org\/)?Product$/i.test(type))) products.push(node);
+    collect(node['@graph'], depth + 1);
+    collect(node.mainEntity, depth + 1);
+  }
+  for (const [, json] of html.matchAll(/<script\b[^>]*\btype\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+    try {
+      collect(JSON.parse(json));
+    } catch {
+      // Ignore malformed structured data.
+    }
+  }
+
+  const metadata = new Map();
+  for (const [tag] of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const attrs = Object.fromEntries(Array.from(tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g),
+      ([, key, double, single]) => [key.toLowerCase(), double ?? single]));
+    const key = (attrs.property || attrs.name || attrs.itemprop || '').toLowerCase();
+    if (key && attrs.content != null) {
+      if (!metadata.has(key)) metadata.set(key, new Set());
+      metadata.get(key).add(attrs.content);
+    }
+  }
+  const one = values => values?.size === 1 ? values.values().next().value : undefined;
+  const result = {};
+  if (products.length > 1) return result;
+  const product = products[0];
+  const productPage = !!product || one(metadata.get('og:type')) === 'product' || metadata.has('product:price:amount');
+  if (!productPage) return result;
+  const rawName = product?.name || one(metadata.get('og:title'));
+  if (typeof rawName === 'string') {
+    const entities = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ' };
+    const title = rawName.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, value) => {
+      if (!value.startsWith('#')) return entities[value.toLowerCase()] ?? whole;
+      const number = /^#x/i.test(value) ? parseInt(value.slice(2), 16) : Number(value.slice(1));
+      return number > 31 && number <= 0x10ffff && !(number >= 0xd800 && number <= 0xdfff)
+        ? String.fromCodePoint(number) : whole;
+    }).replace(/\s+/g, ' ').trim();
+    if (title && title.length <= 200) result.name = title;
+  }
+
+  const usdPrice = (amount, currency) =>
+    currency === 'USD' && /^\d+(?:\.\d{1,2})?$/.test(String(amount).trim()) && Number.isFinite(Number(amount))
+      ? Number(amount) : undefined;
+  const offers = [product?.offers].flat().filter(offer => offer && offer.price != null);
+  const offerPrices = new Set(offers.map(offer => usdPrice(offer.price, offer.priceCurrency)));
+  const price = offers.length ? one(offerPrices) : usdPrice(
+    one(metadata.get('product:price:amount') || metadata.get('price')),
+    one(metadata.get('product:price:currency') || metadata.get('pricecurrency'))
+  );
+  if (price != null) result.price = price;
+  return result;
+}
+
 function wishlistGiftDetails_(value, link) {
   const shoppingLink = String(link).trim();
   const url = /^https?:\/\/[^\s]+$/i.test(shoppingLink) ? shoppingLink : '';
   const name = String(value).trim();
   if (name || !url) return { name, url };
 
-  // Only use the URL's public text. No shopping link is fetched by the script.
+  // Fall back to the URL's public text when retailer metadata is unavailable.
   const parts = url.match(/^https?:\/\/([\w.-]+)(?::\d+)?(\/[^?#\\]*)?(?=[?#]|$)/i);
   if (!parts) return { name: '', url };
   const host = parts[1].toLowerCase().replace(/^www\./, '');
@@ -307,22 +428,52 @@ function wishlistGiftDetails_(value, link) {
   return { name: 'Gift from ' + host, url };
 }
 
-function listWishlistGifts_(sheet) {
+function wishlistGiftRows_(sheet) {
   const count = sheet.getLastRow() - 1;
-  if (count < 1) return [];
-  const rows = sheet.getRange(2, 1, count, WISHLIST_HEADERS.length).getValues();
+  return count < 1 ? [] : sheet.getRange(2, 1, count, WISHLIST_HEADERS.length).getValues();
+}
+
+function listWishlistGifts_(sheet, metadata = new Map()) {
+  const rows = wishlistGiftRows_(sheet);
   const gifts = [];
   const existingIds = new Set(rows.map(row => row[0]).filter(validWishlistId_));
   const seenIds = new Set();
-  let idsAssigned = false;
+  let wroteToSheet = false;
   rows.forEach(([id, value, link, priority, purchased, price], index) => {
+    const lookup = metadata.get(wishlistProductUrl_(link));
+    if (lookup) {
+      // The retailer request has finished. Re-read the cells before filling blanks.
+      const row = index + 2;
+      const [currentId, currentName, currentLink, , , currentPrice] =
+        sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
+      if (currentId === id && currentLink === link) {
+        value = currentName;
+        price = currentPrice;
+        if (!String(value).trim() && lookup.name) {
+          const nameCell = sheet.getRange(row, 2);
+          if (!nameCell.getFormula()) {
+            nameCell.setRichTextValue(SpreadsheetApp.newRichTextValue().setText(lookup.name).build());
+            value = lookup.name;
+            wroteToSheet = true;
+          }
+        }
+        if (price === '' && lookup.price != null) {
+          const priceCell = sheet.getRange(row, 6);
+          if (!priceCell.getFormula()) {
+            priceCell.setValue(lookup.price);
+            price = lookup.price;
+            wroteToSheet = true;
+          }
+        }
+      }
+    }
     const { name, url } = wishlistGiftDetails_(value, link);
     if (!name) return;
     if (!validWishlistId_(id) || seenIds.has(id)) {
       do { id = Utilities.getUuid(); } while (existingIds.has(id));
       existingIds.add(id);
       sheet.getRange(index + 2, 1).setValue(id);
-      idsAssigned = true;
+      wroteToSheet = true;
     }
     seenIds.add(id);
     const rank = PRIORITIES[String(priority).trim().toLowerCase()];
@@ -336,7 +487,7 @@ function listWishlistGifts_(sheet) {
       order: index,
     });
   });
-  if (idsAssigned) SpreadsheetApp.flush();
+  if (wroteToSheet) SpreadsheetApp.flush();
   gifts.sort((left, right) =>
     Number(left.purchased) - Number(right.purchased) ||
     (left.purchased ? 0 : left.priority - right.priority) ||
