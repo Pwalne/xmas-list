@@ -559,7 +559,7 @@ function retryWishlistPhotos_(properties, request, sessionKey) {
     for (const [index, [id, , link]] of rows.entries()) {
       const due = wishlistPhotoRetryAt_(photos[index]?.[0], link);
       if (!validWishlistId_(id) || !due || due > now) continue;
-      column ||= wishlistPhotoColumn_(sheet, true);
+      if (!column) column = wishlistPhotoColumn_(sheet, true);
       const cell = sheet.getRange(index + 2, column);
       if (cell.getFormula()) continue;
       cell.setValue(lease);
