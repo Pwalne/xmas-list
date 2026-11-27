@@ -80,7 +80,7 @@ h3 { font-size: 1.37rem; }
 .entry form { margin-top: 1.3rem; }
 .entry label { display: block; margin-bottom: .35rem; font-size: .9rem; font-weight: 650; }
 .entry-fields { display: flex; gap: .65rem; }
-input[type="password"] {
+input[type="password"], #add-wishlist input {
   width: 100%;
   min-width: 0;
   border: 1px solid #aebdb0;
@@ -90,6 +90,10 @@ input[type="password"] {
   color: inherit;
   font: inherit;
 }
+
+#add-wishlist input { margin-bottom: .75rem; }
+#sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
+.actions { flex-wrap: wrap; }
 
 button {
   flex: none;

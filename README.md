@@ -22,7 +22,12 @@ amount until you update it in the Sheet. A blank price is hidden.
 
 ## Adding a child's wishlist
 
-In the organizer's private spreadsheet, add one row to **Wishlist settings**.
+On the website, unlock the family wishlist, then use **Manage wishlists**
+and enter the separate admin passphrase. Supply the child name, the Google
+Sheet link or ID if it is a separate workbook, and the exact gift tab name.
+The site checks the gift tab and assigns a List ID for you.
+
+The organizer can also add a row directly to **Wishlist settings** in the private spreadsheet.
 The first row contains these headings, in order.
 
 | Column | What to enter |
@@ -41,6 +46,11 @@ a page reload. Only the organizer needs access to the settings spreadsheet.
 
 Change the `WISHLIST_PASSPHRASE` script property to revoke existing site
 sessions. Sessions also expire after four hours.
+
+Set `WISHLIST_ADMIN_PASSPHRASE` in Apps Script to enable the website settings.
+Use a separate, strong passphrase and share it privately with the organizers.
+The admin session expires after 30 minutes or closes when you close settings
+or lock the wishlist.
 
 ## Deploying the wishlist
 

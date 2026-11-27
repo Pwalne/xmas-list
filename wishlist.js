@@ -13,6 +13,12 @@ const giftsPanel = document.querySelector('#gifts-panel');
 const giftsHeading = document.querySelector('#gifts-heading');
 const refresh = document.querySelector('#refresh');
 const lock = document.querySelector('#lock');
+const manage = document.querySelector('#manage-wishlists');
+const adminPanel = document.querySelector('#wishlist-admin');
+const adminForm = document.querySelector('#admin-unlock');
+const adminPassphrase = document.querySelector('#admin-passphrase');
+const addListForm = document.querySelector('#add-wishlist');
+const adminStatus = document.querySelector('#admin-status');
 const empty = document.querySelector('#empty');
 const available = document.querySelector('#available');
 const purchased = document.querySelector('#purchased');
@@ -26,6 +32,7 @@ const targetProductPhotos = new Map([
 let token = '';
 let gifts = [];
 let busy = false;
+let adminToken = '';
 let lists = [];
 let selectedList = null;
 
@@ -36,6 +43,10 @@ const errors = {
   gift_missing: 'This gift may have changed. Refresh the list and try again.',
   busy: 'The wishlist is busy. Please try again.',
   list_unavailable: 'This list’s Google Sheet is unavailable. Ask the list organizer to check its sharing and setup.',
+  admin_unavailable: 'Wishlist administration hasn’t been configured.',
+  admin_session_expired: 'Admin access expired. Enter the admin passphrase again.',
+  invalid_list_settings: 'Enter a child name, a valid Google Sheet link or ID if needed, and the exact gift tab name.',
+  list_already_added: 'That gift tab is already connected.',
 };
 
 function showStatus(message, isError = false) {
@@ -59,6 +70,8 @@ function setBusy(value) {
   passphrase.readOnly = value;
   refresh.disabled = value;
   lock.disabled = value;
+  manage.disabled = value;
+  adminPanel.querySelectorAll('button').forEach(button => { button.disabled = value; });
   wishlistTabs.querySelectorAll('button').forEach(button => { button.disabled = value; });
   available.querySelectorAll('input').forEach(input => { input.disabled = value; });
 }
@@ -195,6 +208,7 @@ function clearGifts() {
 
 function showLocked(shouldFocus = true) {
   storeSession('');
+  closeAdmin();
   lists = [];
   selectedList = null;
   renderWishlistTabs();
@@ -204,6 +218,89 @@ function showLocked(shouldFocus = true) {
   passphrase.value = '';
   if (shouldFocus) passphrase.focus();
 }
+
+function closeAdmin() {
+  adminToken = '';
+  adminPanel.hidden = true;
+  adminForm.hidden = false;
+  adminForm.reset();
+  addListForm.hidden = true;
+  addListForm.reset();
+  adminStatus.textContent = '';
+  manage.setAttribute('aria-expanded', 'false');
+}
+
+manage.addEventListener('click', () => {
+  if (!adminPanel.hidden) {
+    closeAdmin();
+    return;
+  }
+  adminPanel.hidden = false;
+  manage.setAttribute('aria-expanded', 'true');
+  adminPassphrase.focus();
+});
+
+function reportAdminError(error, fallback) {
+  if (error.message === 'session_expired') {
+    reportError(error, fallback);
+    return;
+  }
+  if (error.message === 'admin_session_expired') {
+    adminToken = '';
+    addListForm.hidden = true;
+    adminForm.hidden = false;
+    adminPassphrase.focus();
+  }
+  adminStatus.textContent = errors[error.message] || fallback;
+}
+
+adminForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (busy) return;
+  setBusy(true);
+  adminStatus.textContent = 'Unlocking settings…';
+  try {
+    const result = await request('admin_unlock', { passphrase: adminPassphrase.value });
+    adminToken = result.token;
+    adminForm.hidden = true;
+    addListForm.hidden = false;
+    addListForm.elements.name.focus();
+    adminStatus.textContent = '';
+  } catch (error) {
+    reportAdminError(error, 'Couldn’t unlock settings. Try again.');
+  } finally {
+    adminForm.reset();
+    setBusy(false);
+  }
+});
+
+addListForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (busy || !adminToken) return;
+  setBusy(true);
+  adminStatus.textContent = 'Checking and connecting the Sheet…';
+  try {
+    const { list } = await request('admin_add_list', {
+      ...Object.fromEntries(new FormData(addListForm)), adminToken,
+    });
+    lists.push(list);
+    renderWishlistTabs();
+    selectWishlist(selectedList?.id || list.id);
+    addListForm.reset();
+    adminStatus.textContent = 'Added ' + list.name + ' to the wishlist tabs.';
+    if (lists.length === 1) {
+      await loadGifts().catch(error => reportError(error, 'The list was added. Use Refresh to load its gifts.'));
+    }
+  } catch (error) {
+    const fallback = error.message === 'list_unavailable'
+      ? 'Check the tab name, gift column headers, and Google Sheet sharing.'
+      : 'Couldn’t add the list. Try again.';
+    if (error.message === 'list_unavailable') adminStatus.textContent = fallback;
+    else reportAdminError(error, fallback);
+  } finally {
+    setBusy(false);
+  }
+});
 
 function reportError(error, fallback) {
   if (error.message === 'session_expired') showLocked();

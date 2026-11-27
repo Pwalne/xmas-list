@@ -51,6 +51,28 @@ function doPost(event) {
       return wishlistResponse_({ ok: false, code: 'service_unavailable' });
     }
     const sessionKey = signWishlist_('session-key:' + passphrase, secret);
+    if (request.action === 'admin_unlock' || request.action === 'admin_add_list') {
+      if (!validWishlistToken_(request.token, sessionKey, Date.now())) {
+        return wishlistResponse_({ ok: false, code: 'session_expired' });
+      }
+      const adminPassphrase = properties.getProperty('WISHLIST_ADMIN_PASSPHRASE');
+      if (!adminPassphrase || adminPassphrase === passphrase) {
+        return wishlistResponse_({ ok: false, code: 'admin_unavailable' });
+      }
+      const adminKey = signWishlist_('admin-session:' + adminPassphrase, sessionKey);
+      if (request.action === 'admin_unlock') {
+        if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
+          return wishlistResponse_({ ok: false, code: 'invalid_request' });
+        }
+        return wishlistResponse_(withWishlistLock_(() => unlockWishlist_(
+          request.passphrase, properties, adminPassphrase, adminKey, 'WISHLIST_ADMIN_FAILED_ATTEMPTS', 30 * 60 * 1000
+        )));
+      }
+      if (!validWishlistToken_(request.adminToken, adminKey, Date.now())) {
+        return wishlistResponse_({ ok: false, code: 'admin_session_expired' });
+      }
+      return wishlistResponse_(withWishlistLock_(() => addWishlist_(properties, request)));
+    }
     if (request.action === 'unlock') {
       if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
         return wishlistResponse_({ ok: false, code: 'invalid_request' });
@@ -95,9 +117,10 @@ function withWishlistLock_(callback) {
   }
 }
 
-function unlockWishlist_(submitted, properties, passphrase, sessionKey) {
+function unlockWishlist_(submitted, properties, passphrase, sessionKey,
+  attemptsKey = 'WISHLIST_FAILED_ATTEMPTS', lifetime = SESSION_LIFETIME_MS) {
   const now = Date.now();
-  const stored = properties.getProperty('WISHLIST_FAILED_ATTEMPTS');
+  const stored = properties.getProperty(attemptsKey);
   const [until, count] = (stored || '0:0').split(':').map(Number);
   if (until > now && count >= MAX_FAILED_ATTEMPTS) {
     return { ok: false, code: 'rate_limited' };
@@ -107,14 +130,14 @@ function unlockWishlist_(submitted, properties, passphrase, sessionKey) {
     signWishlist_('passphrase:' + submitted, sessionKey),
     signWishlist_('passphrase:' + passphrase, sessionKey)
   )) {
-    properties.setProperty('WISHLIST_FAILED_ATTEMPTS', until > now
+    properties.setProperty(attemptsKey, until > now
       ? until + ':' + (count + 1)
       : (now + ATTEMPT_WINDOW_MS) + ':1');
     return { ok: false, code: 'incorrect_passphrase' };
   }
 
-  if (stored) properties.deleteProperty('WISHLIST_FAILED_ATTEMPTS');
-  const payload = (now + SESSION_LIFETIME_MS) + '.' + Utilities.getUuid();
+  if (stored) properties.deleteProperty(attemptsKey);
+  const payload = (now + lifetime) + '.' + Utilities.getUuid();
   return { ok: true, token: payload + '.' + signWishlist_('token:' + payload, sessionKey) };
 }
 
@@ -155,6 +178,38 @@ function configuredWishlists_(properties) {
     lists.set(id, { id, name, spreadsheetId, tab });
   }
   return lists;
+}
+
+function addWishlist_(properties, request) {
+  const { name, source, tab } = request;
+  if (typeof name !== 'string' || !name.trim() || name.length > 80 ||
+      typeof source !== 'string' || source.length > 500 ||
+      typeof tab !== 'string' || !tab.trim() || tab.length > 100) {
+    return { ok: false, code: 'invalid_list_settings' };
+  }
+  const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
+  const spreadsheetId = source.trim() ? wishlistSpreadsheetId_(source.trim()) : homeId;
+  if (!spreadsheetId || (spreadsheetId === homeId && tab.toLowerCase() === WISHLIST_SETTINGS.toLowerCase())) {
+    return { ok: false, code: 'invalid_list_settings' };
+  }
+  const settings = SpreadsheetApp.openById(homeId).getSheetByName(WISHLIST_SETTINGS);
+  if (!settings) return { ok: false, code: 'admin_unavailable' };
+  const lists = configuredWishlists_(properties);
+  if ([...lists.values()].some(list => list.spreadsheetId === spreadsheetId && list.tab === tab)) {
+    return { ok: false, code: 'list_already_added' };
+  }
+  if (!wishlistGiftSheet_({ spreadsheetId, tab })) {
+    return { ok: false, code: 'list_unavailable' };
+  }
+  const id = Utilities.getUuid();
+  const row = [id, name.trim(), spreadsheetId === homeId ? '' : spreadsheetId, tab];
+  const nextRow = settings.getLastRow() + 1;
+  if (nextRow > settings.getMaxRows()) settings.insertRowsAfter(settings.getMaxRows(), 1);
+  settings.getRange(nextRow, 1, 1, row.length).setRichTextValues([
+    row.map(value => SpreadsheetApp.newRichTextValue().setText(value).build()),
+  ]);
+  SpreadsheetApp.flush();
+  return { ok: true, list: { id, name: name.trim() } };
 }
 
 function wishlistSpreadsheetId_(source) {
