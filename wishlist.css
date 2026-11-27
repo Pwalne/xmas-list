@@ -149,7 +149,7 @@ button:disabled { opacity: .6; cursor: default; }
 
 .status { margin: .7rem 0 0; min-height: 0; color: #385b49; }
 .status:empty { display: none; }
-.status.error { color: #942e3e; }
+.status.error, .required-label { color: #942e3e; }
 #status.opening {
   position: fixed;
   z-index: 3;
