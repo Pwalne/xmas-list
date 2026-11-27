@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=6">
-  <script src="./wishlist.js?v=6" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=7">
+  <script src="./wishlist.js?v=7" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -67,7 +67,11 @@
           <button type="submit">Unlock settings</button>
         </div>
       </form>
+      <div id="manage-list-controls" hidden>
+        <ul id="managed-wishlists" class="gift-list" aria-label="Connected wishlists"></ul>
+      </div>
       <form id="add-wishlist" hidden>
+        <h3 id="wishlist-form-heading">Add a wishlist</h3>
         <label for="child-name">Child name</label>
         <input id="child-name" name="name" type="text" required maxlength="80">
         <label for="sheet-source">Google Sheet link or ID</label>
@@ -76,11 +80,21 @@
           they should share it as Editor with the organizer’s Google account.</p>
         <label for="gift-tab">Gift tab name</label>
         <input id="gift-tab" name="tab" type="text" required maxlength="100" placeholder="Gifts">
-        <button type="submit">Add wishlist</button>
+        <button id="save-wishlist" type="submit">Add wishlist</button>
+        <button id="cancel-wishlist-edit" class="secondary" type="button" hidden>Cancel edit</button>
       </form>
       <p id="admin-status" class="status" role="status"></p>
     </section>
   </main>
+
+  <dialog id="remove-wishlist-dialog" aria-labelledby="remove-wishlist-heading">
+    <h2 id="remove-wishlist-heading">Remove wishlist?</h2>
+    <p id="remove-wishlist-message"></p>
+    <div class="actions">
+      <button id="cancel-wishlist-removal" class="secondary" type="button" autofocus>Cancel</button>
+      <button id="confirm-wishlist-removal" type="button">Remove wishlist</button>
+    </div>
+  </dialog>
 
   <template id="gift-template">
     <li class="gift-row">

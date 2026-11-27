@@ -26,6 +26,9 @@ On the website, unlock the family wishlist, then use **Manage wishlists**
 and enter the separate admin passphrase. Supply the child name, the Google
 Sheet link or ID if it is a separate workbook, and the exact gift tab name.
 The site checks the gift tab and assigns a List ID for you.
+Use **Edit** to change a connected child's name, spreadsheet, or gift tab.
+Use **Remove** to disconnect a list from the website. The source spreadsheet
+and its gifts stay in Google Sheets.
 
 The organizer can also add a row directly to **Wishlist settings** in the private spreadsheet.
 The first row contains these headings, in order.

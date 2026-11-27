@@ -6,6 +6,7 @@ const MAX_FAILED_ATTEMPTS = 12;
 
 const WISHLIST_SETTINGS = 'Wishlist settings';
 const SETTINGS_HEADERS = ['List ID', 'Child name', 'Spreadsheet URL or ID', 'Gift tab'];
+const ADMIN_ACTIONS = ['admin_unlock', 'admin_lists', 'admin_add_list', 'admin_edit_list', 'admin_remove_list'];
 
 // Run in the editor after setting WISHLIST_SPREADSHEET_ID.
 function setupWishlist() {
@@ -14,7 +15,6 @@ function setupWishlist() {
     throw new Error('Set WISHLIST_PASSPHRASE to the shared site passphrase.');
   }
   const lists = configuredWishlists_(properties);
-  if (!lists.size) throw new Error('Add a list to the Wishlist settings tab.');
   for (const list of lists.values()) {
     if (!wishlistGiftSheet_(list)) throw new Error('Check the gift tab and its headers for list ' + list.id);
   }
@@ -51,7 +51,7 @@ function doPost(event) {
       return wishlistResponse_({ ok: false, code: 'service_unavailable' });
     }
     const sessionKey = signWishlist_('session-key:' + passphrase, secret);
-    if (request.action === 'admin_unlock' || request.action === 'admin_add_list') {
+    if (ADMIN_ACTIONS.includes(request.action)) {
       if (!validWishlistToken_(request.token, sessionKey, Date.now())) {
         return wishlistResponse_({ ok: false, code: 'session_expired' });
       }
@@ -71,7 +71,7 @@ function doPost(event) {
       if (!validWishlistToken_(request.adminToken, adminKey, Date.now())) {
         return wishlistResponse_({ ok: false, code: 'admin_session_expired' });
       }
-      return wishlistResponse_(withWishlistLock_(() => addWishlist_(properties, request)));
+      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request)));
     }
     if (request.action === 'unlock') {
       if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
@@ -96,10 +96,14 @@ function doPost(event) {
       }
       const list = lists.get(request.listId ?? (lists.size === 1 ? lists.keys().next().value : ''));
       if (!list) return { ok: false, code: 'list_unavailable' };
+      const listRevision = signWishlist_(JSON.stringify([list.id, list.spreadsheetId, list.tab]), sessionKey);
+      if (request.action === 'purchase' && request.listRevision != null && request.listRevision !== listRevision) {
+        return { ok: false, code: 'list_changed' };
+      }
       const sheet = wishlistGiftSheet_(list);
       if (!sheet) return { ok: false, code: 'list_unavailable' };
       if (request.action === 'purchase') return purchaseWishlistGift_(sheet, request.giftId);
-      return { ok: true, gifts: listWishlistGifts_(sheet) };
+      return { ok: true, gifts: listWishlistGifts_(sheet), listRevision };
     }));
   } catch (error) {
     console.error('Wishlist operation failed: ' + error.name);
@@ -167,7 +171,7 @@ function configuredWishlists_(properties) {
   if (count < 1) return lists;
   const rows = settings.getRange(2, 1, count, SETTINGS_HEADERS.length).getDisplayValues();
 
-  for (const [rawId, rawName, source, tab] of rows) {
+  for (const [index, [rawId, rawName, source, tab]] of rows.entries()) {
     const id = rawId.trim();
     const name = rawName.trim();
     const spreadsheetId = source.trim() ? wishlistSpreadsheetId_(source.trim()) : homeId;
@@ -175,35 +179,57 @@ function configuredWishlists_(properties) {
         !tab.trim() ||
         (spreadsheetId === homeId && tab.toLowerCase() === WISHLIST_SETTINGS.toLowerCase())) continue;
     if (lists.has(id)) throw new Error('Duplicate list ID in Wishlist settings.');
-    lists.set(id, { id, name, spreadsheetId, tab });
+    lists.set(id, { id, name, spreadsheetId, tab, row: index + 2 });
   }
   return lists;
 }
 
-function addWishlist_(properties, request) {
+function manageWishlists_(properties, request) {
+  const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
+  const settings = SpreadsheetApp.openById(homeId).getSheetByName(WISHLIST_SETTINGS);
+  if (!settings) return { ok: false, code: 'admin_unavailable' };
+  const lists = configuredWishlists_(properties);
+  const renderList = list => ({
+    id: list.id,
+    name: list.name,
+    source: list.spreadsheetId === homeId ? '' : list.spreadsheetId,
+    tab: list.tab,
+  });
+  if (request.action === 'admin_lists') {
+    return { ok: true, lists: Array.from(lists.values(), renderList) };
+  }
+  const existing = lists.get(request.listId);
+  if (request.action !== 'admin_add_list') {
+    if (!existing || JSON.stringify(renderList(existing)) !== request.previous) {
+      return { ok: false, code: 'list_changed' };
+    }
+  }
+  if (request.action === 'admin_remove_list') {
+    settings.getRange(existing.row, 1, 1, SETTINGS_HEADERS.length).clearContent();
+    SpreadsheetApp.flush();
+    return { ok: true };
+  }
+
   const { name, source, tab } = request;
   if (typeof name !== 'string' || !name.trim() || name.length > 80 ||
       typeof source !== 'string' || source.length > 500 ||
       typeof tab !== 'string' || !tab.trim() || tab.length > 100) {
     return { ok: false, code: 'invalid_list_settings' };
   }
-  const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
   const spreadsheetId = source.trim() ? wishlistSpreadsheetId_(source.trim()) : homeId;
   if (!spreadsheetId || (spreadsheetId === homeId && tab.toLowerCase() === WISHLIST_SETTINGS.toLowerCase())) {
     return { ok: false, code: 'invalid_list_settings' };
   }
-  const settings = SpreadsheetApp.openById(homeId).getSheetByName(WISHLIST_SETTINGS);
-  if (!settings) return { ok: false, code: 'admin_unavailable' };
-  const lists = configuredWishlists_(properties);
-  if ([...lists.values()].some(list => list.spreadsheetId === spreadsheetId && list.tab === tab)) {
+  if ([...lists.values()].some(list => list.id !== existing?.id && list.spreadsheetId === spreadsheetId && list.tab === tab)) {
     return { ok: false, code: 'list_already_added' };
   }
-  if (!wishlistGiftSheet_({ spreadsheetId, tab })) {
+  if ((spreadsheetId !== existing?.spreadsheetId || tab !== existing?.tab) &&
+      !wishlistGiftSheet_({ spreadsheetId, tab })) {
     return { ok: false, code: 'list_unavailable' };
   }
-  const id = Utilities.getUuid();
+  const id = existing?.id || Utilities.getUuid();
   const row = [id, name.trim(), spreadsheetId === homeId ? '' : spreadsheetId, tab];
-  const nextRow = settings.getLastRow() + 1;
+  const nextRow = existing?.row || settings.getLastRow() + 1;
   if (nextRow > settings.getMaxRows()) settings.insertRowsAfter(settings.getMaxRows(), 1);
   settings.getRange(nextRow, 1, 1, row.length).setRichTextValues([
     row.map(value => SpreadsheetApp.newRichTextValue().setText(value).build()),

@@ -92,6 +92,17 @@ input[type="password"], #add-wishlist input {
 }
 
 #add-wishlist input { margin-bottom: .75rem; }
+#wishlist-form-heading { margin: .75rem 0; }
+#remove-wishlist-dialog {
+  max-width: min(28rem, calc(100% - 2rem));
+  padding: 1.4rem;
+  border: 1px solid #c4d1c3;
+  border-radius: .8rem;
+  color: inherit;
+  background: #fffef9;
+}
+#remove-wishlist-dialog::backdrop { background: #14382f70; }
+#remove-wishlist-message { margin: .65rem 0 1rem; }
 #sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
 .actions { flex-wrap: wrap; }
 
