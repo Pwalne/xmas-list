@@ -12,7 +12,6 @@ const status = document.querySelector('#status');
 const giftsPanel = document.querySelector('#gifts-panel');
 const giftsHeading = document.querySelector('#gifts-heading');
 const refresh = document.querySelector('#refresh');
-const lock = document.querySelector('#lock');
 const manage = document.querySelector('#manage-wishlists');
 const adminPanel = document.querySelector('#wishlist-admin');
 const adminForm = document.querySelector('#admin-unlock');
@@ -82,7 +81,6 @@ function setBusy(value) {
   unlockButton.disabled = value || !endpoint;
   passphrase.readOnly = value;
   refresh.disabled = value;
-  lock.disabled = value;
   manage.disabled = value;
   adminPanel.querySelectorAll('button').forEach(button => { button.disabled = value; });
   confirmRemoval.disabled = value;
@@ -504,11 +502,6 @@ refresh.addEventListener('click', async () => {
   } finally {
     setBusy(false);
   }
-});
-
-lock.addEventListener('click', () => {
-  showLocked();
-  showStatus('');
 });
 
 async function restoreSession() {

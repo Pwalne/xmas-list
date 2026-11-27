@@ -59,8 +59,7 @@ sessions. Sessions also expire after four hours.
 
 Set `WISHLIST_ADMIN_PASSPHRASE` in Apps Script to enable the website settings.
 Use a separate, strong passphrase and share it privately with the organizers.
-The admin session expires after 30 minutes or closes when you close settings
-or lock the wishlist.
+The admin session expires after 30 minutes or closes when you close settings.
 
 ## Deploying the wishlist
 
