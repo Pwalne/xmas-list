@@ -25,11 +25,9 @@ const giftAddFooter = document.querySelector('#gift-add-footer');
 const editConnectedList = document.querySelector('#edit-connected-list');
 const removeConnectedList = document.querySelector('#remove-connected-list');
 const addGiftForm = document.querySelector('#add-gift');
-const openBulkAdd = document.querySelector('#open-bulk-add');
-const bulkGiftForm = document.querySelector('#bulk-add-gifts');
-const bulkGiftLines = document.querySelector('#bulk-gift-lines');
-const bulkGiftPreview = document.querySelector('#bulk-gift-preview');
-const saveBulkGifts = document.querySelector('#save-bulk-gifts');
+const queueGift = document.querySelector('#queue-gift');
+const pendingGiftList = document.querySelector('#pending-gifts');
+const saveGifts = document.querySelector('#save-gifts');
 const saveWishlist = document.querySelector('#save-wishlist');
 const removeDialog = document.querySelector('#remove-wishlist-dialog');
 const removalHeading = document.querySelector('#remove-wishlist-heading');
@@ -54,7 +52,7 @@ let adminToken = '';
 let editingList = null;
 let managedLists = [];
 let pendingGiftId;
-let bulkGifts = [];
+let pendingGifts = [];
 let removingList = null;
 let editingGift = null;
 let removingGift = null;
@@ -124,7 +122,6 @@ function setBusy(value) {
   removeConnectedList.disabled = value;
   adminPanel.querySelectorAll('button').forEach(button => { button.disabled = value; });
   addGiftForm.querySelectorAll('input, select').forEach(field => { field.disabled = value; });
-  bulkGiftLines.readOnly = value;
   confirmRemoval.disabled = value;
   wishlistTabs.querySelectorAll('button').forEach(button => { button.disabled = value; });
   available.querySelectorAll('input').forEach(input => { input.disabled = value; });
@@ -310,12 +307,9 @@ function closeAdmin() {
   managedLists = [];
   editingList = null;
   editingGift = null;
-  pendingGiftId = undefined;
   adminForm.reset();
   addListForm.reset();
-  addGiftForm.reset();
-  bulkGiftForm.reset();
-  clearBulkPreview();
+  resetGiftEntry();
   adminPanel.close();
   renderWishlistTabs();
   selectWishlist(selectedList?.id);
@@ -323,7 +317,7 @@ function closeAdmin() {
 
 function showAdminForm(form, heading, field) {
   adminHeading.textContent = heading;
-  for (const candidate of [adminForm, addListForm, addGiftForm, bulkGiftForm]) candidate.hidden = candidate !== form;
+  for (const candidate of [adminForm, addListForm, addGiftForm]) candidate.hidden = candidate !== form;
   adminStatus.textContent = '';
   if (!adminPanel.open) adminPanel.showModal();
   field.focus();
@@ -424,103 +418,71 @@ removeConnectedList.addEventListener('click', () => {
 openAddGift.addEventListener('click', () => {
   const list = selectedManagedList();
   if (!list || !adminToken || busy) return;
-  pendingGiftId = undefined;
   editingGift = null;
-  addGiftForm.reset();
-  openBulkAdd.hidden = false;
-  addGiftForm.querySelector('button[type="submit"]').textContent = 'Add gift';
+  resetGiftEntry();
+  queueGift.hidden = false;
+  saveGifts.textContent = 'Done';
   showAdminForm(addGiftForm, 'Add a gift to ' + list.name, addGiftForm.elements.name);
 });
 
-function clearBulkPreview() {
-  bulkGifts = [];
-  bulkGiftPreview.replaceChildren();
-  bulkGiftPreview.hidden = true;
-  saveBulkGifts.hidden = true;
+function renderPendingGifts() {
+  pendingGiftList.replaceChildren();
+  pendingGiftList.hidden = !pendingGifts.length;
+  for (const gift of pendingGifts) {
+    const row = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = gift.name || gift.link;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary';
+    remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', 'Remove ' + label.textContent + ' from pending gifts');
+    remove.addEventListener('click', () => {
+      if (busy) return;
+      pendingGifts = pendingGifts.filter(entry => entry !== gift);
+      renderPendingGifts();
+      adminStatus.textContent = '';
+      addGiftForm.elements.name.focus();
+    });
+    row.append(label, remove);
+    pendingGiftList.append(row);
+  }
 }
 
-openBulkAdd.addEventListener('click', () => {
-  const list = selectedManagedList();
-  if (busy || !adminToken || !list) return;
-  bulkGiftForm.reset();
-  clearBulkPreview();
-  showAdminForm(bulkGiftForm, 'Bulk add gifts to ' + list.name, bulkGiftLines);
-});
-
-bulkGiftLines.addEventListener('input', () => {
-  clearBulkPreview();
-  adminStatus.textContent = '';
-});
-
-function parseBulkGifts(text) {
-  const entries = [];
-  const lines = text.split(/\r?\n/);
-  for (const [index, line] of lines.entries()) {
-    if (!line.trim()) continue;
-    const columns = line.split('\t').map(column => column.trim());
-    let [name, link = '', price = ''] = columns;
-    if (columns.length === 1 && /^https?:\/\//i.test(name)) [name, link] = ['', name];
-    price = price.replace(/^\$/, '');
-    if (columns.length > 3 || (!name && !link) || name.length > 200 || link.length > 500 ||
-        (link && !/^https?:\/\/[\w.-]+(?::\d+)?(?:[/?#][^\s\\]*)?$/i.test(link)) ||
-        (price && !/^\d{1,9}(?:\.\d{1,2})?$/.test(price))) {
-      throw new Error('Check the name, shopping link, or price on line ' + (index + 1) + '.');
-    }
-    entries.push({ name, link, price, priority: 'Normal', giftId: crypto.randomUUID() });
-  }
-  if (!entries.length || entries.length > 25) throw new Error('Enter between 1 and 25 gifts.');
-  return entries;
+function resetGiftEntry() {
+  pendingGifts = [];
+  pendingGiftId = undefined;
+  addGiftForm.reset();
+  renderPendingGifts();
 }
 
-document.querySelector('#preview-bulk-gifts').addEventListener('click', () => {
-  if (busy) return;
-  if (bulkGifts.length) {
-    saveBulkGifts.focus();
-    return;
+function readGiftEntry() {
+  const fields = Object.fromEntries(new FormData(addGiftForm));
+  fields.name = fields.name.trim();
+  fields.link = fields.link.trim();
+  if (!fields.name && !fields.link && !fields.price && fields.priority === 'Normal') return null;
+  if ((!fields.name && !fields.link) || (fields.link && !/^https?:\/\/[\w.-]+(?::\d+)?(?:[/?#][^\s\\]*)?$/i.test(fields.link)) ||
+      (fields.price && !/^\d{1,9}(?:\.\d{1,2})?$/.test(fields.price))) {
+    throw new Error(errors.invalid_gift);
   }
+  pendingGiftId ||= crypto.randomUUID();
+  return { ...fields, giftId: pendingGiftId };
+}
+
+queueGift.addEventListener('click', () => {
+  if (busy || editingGift || !selectedManagedList() || !addGiftForm.reportValidity()) return;
   try {
-    bulkGifts = parseBulkGifts(bulkGiftLines.value);
-    for (const gift of bulkGifts) {
-      const preview = document.createElement('li');
-      preview.textContent = (gift.name || gift.link) + (gift.price ? ' · ' + priceFormat.format(Number(gift.price)) : '');
-      bulkGiftPreview.append(preview);
-    }
-    bulkGiftPreview.hidden = false;
-    saveBulkGifts.hidden = false;
-    saveBulkGifts.textContent = bulkGifts.length === 1 ? 'Add 1 gift' : 'Add ' + bulkGifts.length + ' gifts';
-    adminStatus.textContent = '';
-    saveBulkGifts.focus();
+    const gift = readGiftEntry();
+    if (!gift) throw new Error(errors.invalid_gift);
+    if (pendingGifts.length >= 25) throw new Error('Save these 25 gifts before adding more.');
+    pendingGifts.push(gift);
+    renderPendingGifts();
+    pendingGiftId = undefined;
+    addGiftForm.reset();
+    adminStatus.textContent = pendingGifts.length === 1 ? '1 gift ready to add.' : pendingGifts.length + ' gifts ready to add.';
+    addGiftForm.elements.name.focus();
   } catch (error) {
     adminStatus.textContent = error.message;
-  }
-});
-
-bulkGiftForm.addEventListener('submit', async event => {
-  event.preventDefault();
-  const list = selectedManagedList();
-  if (busy || !adminToken || !list || !bulkGifts.length) return;
-  setBusy(true);
-  adminStatus.textContent = 'Saving gifts…';
-  try {
-    const result = await request('admin_add_gifts', {
-      adminToken, listId: list.id, previous: JSON.stringify(list), gifts: bulkGifts, includeView: true,
-    });
-    bulkGiftForm.reset();
-    clearBulkPreview();
-    adminPanel.close();
-    const added = result.added + (result.added === 1 ? ' gift added.' : ' gifts added.');
-    showStatus(added + (result.skipped ? ' Skipped ' + result.skipped + ' already-added items.' : ''));
-    try {
-      if (result.view) displayGifts(result.view);
-      else await loadGifts();
-    } catch (error) {
-      reportError(error, added + ' Use Refresh to load the updated list.');
-    }
-  } catch (error) {
-    reportAdminError(error, 'Couldn’t save the gifts. Try again.');
-  } finally {
-    setBusy(false);
-    if (!adminPanel.open) openAddGift.focus();
   }
 });
 
@@ -540,12 +502,12 @@ async function openGiftAdmin(gift, removing) {
       removeDialog.showModal();
     } else {
       editingGift = result;
-      addGiftForm.reset();
-      openBulkAdd.hidden = true;
+      resetGiftEntry();
+      queueGift.hidden = true;
       for (const field of ['name', 'link', 'priority', 'price']) {
         addGiftForm.elements[field].value = result.gift[field];
       }
-      addGiftForm.querySelector('button[type="submit"]').textContent = 'Save gift';
+      saveGifts.textContent = 'Save gift';
       showAdminForm(addGiftForm, 'Edit gift', addGiftForm.elements.name);
     }
   } catch (error) {
@@ -561,21 +523,35 @@ addGiftForm.addEventListener('submit', async event => {
   event.preventDefault();
   const list = selectedManagedList();
   if (busy || !adminToken || !list) return;
-  const fields = Object.fromEntries(new FormData(addGiftForm));
-  pendingGiftId ||= crypto.randomUUID();
-  setBusy(true);
-  adminStatus.textContent = 'Adding gift…';
+  const existing = editingGift;
+  let entries;
   try {
-    const existing = editingGift;
-    const result = await request(existing ? 'admin_edit_gift' : 'admin_add_gift', {
-      ...fields, adminToken, listId: list.id, previous: JSON.stringify(list),
-      giftId: existing?.gift.id || pendingGiftId, revision: existing?.revision, includeView: true,
-    });
-    pendingGiftId = undefined;
+    const current = readGiftEntry();
+    entries = current ? [...pendingGifts, current] : pendingGifts;
+    if (!entries.length) throw new Error(errors.invalid_gift);
+    if (entries.length > 25) throw new Error('Only 25 gifts can be saved at once. Remove a pending gift or clear the current entry.');
+  } catch (error) {
+    adminStatus.textContent = error.message;
+    return;
+  }
+  const batch = entries.length > 1;
+  setBusy(true);
+  adminStatus.textContent = batch ? 'Saving gifts…' : 'Saving gift…';
+  try {
+    const target = { adminToken, listId: list.id, previous: JSON.stringify(list), includeView: true };
+    const result = batch
+      ? await request('admin_add_gifts', { ...target, gifts: entries })
+      : await request(existing ? 'admin_edit_gift' : 'admin_add_gift', {
+        ...target, ...entries[0], giftId: existing?.gift.id || entries[0].giftId, revision: existing?.revision,
+      });
     editingGift = null;
-    addGiftForm.reset();
+    resetGiftEntry();
     adminPanel.close();
-    const message = existing ? 'Gift updated.' : 'Gift added to ' + list.name + '.';
+    let message = existing ? 'Gift updated.' : 'Gift added to ' + list.name + '.';
+    if (batch) {
+      message = result.added + (result.added === 1 ? ' gift added.' : ' gifts added.');
+      if (result.skipped) message += ' Skipped ' + result.skipped + (result.skipped === 1 ? ' duplicate.' : ' duplicates.');
+    }
     showStatus(message);
     try {
       if (result.view) displayGifts(result.view);
@@ -584,7 +560,7 @@ addGiftForm.addEventListener('submit', async event => {
       reportError(error, message + ' Use Refresh to load the updated list.');
     }
   } catch (error) {
-    reportAdminError(error, 'Couldn’t save the gift. Try again.');
+    reportAdminError(error, 'Couldn’t save. Try again.');
   } finally {
     setBusy(false);
     if (!adminPanel.open) openAddGift.focus();

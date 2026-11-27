@@ -125,16 +125,16 @@ input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
 #remove-wishlist-dialog::backdrop, #wishlist-admin::backdrop { background: #14382f70; }
 #remove-wishlist-message { margin: .65rem 0 1rem; }
 #sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
-#bulk-gift-lines {
-  width: 100%;
-  padding: .65rem;
-  border: 1px solid #c4d1c3;
-  border-radius: .55rem;
-  font: inherit;
-  resize: vertical;
+#pending-gifts { list-style: none; padding: 0; max-height: 11rem; overflow-y: auto; }
+#pending-gifts li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  border-top: 1px solid #c4d1c3;
+  padding: .35rem 0;
+  overflow-wrap: anywhere;
 }
-#bulk-gift-help { margin: .5rem 0 .9rem; color: #475b50; font-size: .9rem; }
-#bulk-gift-preview { max-height: 11rem; overflow-y: auto; overflow-wrap: anywhere; }
 .actions { flex-wrap: wrap; }
 
 button, .shop-link {
