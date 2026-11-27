@@ -1,5 +1,7 @@
 const WISHLIST_HEADERS = ['Gift ID', 'Gift name', 'Shopping link', 'Priority', 'Purchased', 'Price'];
 const WISHLIST_PHOTO_HEADER = 'Product photo URL';
+const WISHLIST_PHOTO_RETRY_DELAY_MS = 15 * 60 * 1000;
+const WISHLIST_PHOTO_RETRY_BATCH = 6;
 const PRIORITIES = { high: 0, normal: 1, low: 2 };
 const SESSION_LIFETIME_MS = 4 * 60 * 60 * 1000;
 const ATTEMPT_WINDOW_MS = 2 * 60 * 1000;
@@ -116,11 +118,14 @@ function doPost(event) {
       if (!result.ok || !request.includeView) return wishlistResponse_(result);
       return wishlistResponse_({ ...result, ...openWishlist_(configuredWishlists_(properties), request.listId, sessionKey) });
     }
-    if (!['open', 'directory', 'list', 'purchase'].includes(request.action)) {
+    if (!['open', 'directory', 'list', 'purchase', 'retry_photos'].includes(request.action)) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
     }
     if (!validWishlistToken_(request.token, sessionKey, Date.now())) {
       return wishlistResponse_({ ok: false, code: 'session_expired' });
+    }
+    if (request.action === 'retry_photos') {
+      return wishlistResponse_(retryWishlistPhotos_(properties, request, sessionKey));
     }
     if (request.action === 'purchase' && !validWishlistId_(request.giftId)) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
@@ -141,7 +146,7 @@ function doPost(event) {
       const sheet = wishlistGiftSheet_(list);
       if (!sheet) return { ok: false, code: 'list_unavailable' };
       if (request.action === 'purchase') return purchaseWishlistGift_(sheet, request.giftId);
-      return { ok: true, gifts: listWishlistGifts_(sheet), listRevision };
+      return wishlistView_(list, sessionKey, sheet);
     };
     return wishlistResponse_(request.action === 'purchase' ? withWishlistLock_(readOrPurchase) : readOrPurchase());
   } catch (error) {
@@ -156,7 +161,11 @@ function wishlistSourceRevision_(list, sessionKey) {
 
 function wishlistView_(list, sessionKey, sheet = wishlistGiftSheet_(list), lockHeld = false) {
   if (!sheet) return { ok: false, code: 'list_unavailable' };
-  return { ok: true, gifts: listWishlistGifts_(sheet, lockHeld), listRevision: wishlistSourceRevision_(list, sessionKey) };
+  const gifts = listWishlistGifts_(sheet, lockHeld);
+  const now = Date.now();
+  const photoRetryDue = !lockHeld && gifts.some(gift => gift.id && gift.photoRetryAt && gift.photoRetryAt <= now);
+  return { ok: true, gifts: gifts.map(({ photoRetryAt, ...gift }) => gift),
+    listRevision: wishlistSourceRevision_(list, sessionKey), photoRetryDue };
 }
 
 function openWishlist_(lists, preferredId, sessionKey) {
@@ -350,7 +359,7 @@ function addWishlistGift_(sheet, giftId, gift) {
   const rows = wishlistGiftRows_(sheet);
   if (rows.some(row => row[0] === giftId)) return { ok: true };
 
-  appendWishlistRows_(sheet, rows, [[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]], [gift.imageUrl]);
+  appendWishlistRows_(sheet, rows, [[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]], [wishlistPhotoValue_(gift)]);
   return { ok: true };
 }
 
@@ -385,7 +394,7 @@ function addWishlistGifts_(sheet, validated) {
     if (knownIds.has(gift.id) || (key && seenLinks.has(key))) continue;
     if (key) seenLinks.add(key);
     additions.push([gift.id, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]);
-    photos.push(gift.imageUrl);
+    photos.push(wishlistPhotoValue_(gift));
   }
   if (additions.length) appendWishlistRows_(sheet, rows, additions, photos);
   return { ok: true, added: additions.length, skipped: validated.length - additions.length };
@@ -450,9 +459,13 @@ function editWishlistGift_(sheet, listId, request, adminKey, preparedGift) {
     cells.setValues([updated]);
     const sameProduct = link === gift.link || link === request.link ||
       (wishlistProductUrl_(gift.link) && wishlistProductUrl_(link) === wishlistProductUrl_(gift.link));
-    if (gift.imageUrl || !sameProduct) {
-      const column = wishlistPhotoColumn_(sheet, !!gift.imageUrl);
-      if (column) sheet.getRange(cells.getRow(), column).setValue(gift.imageUrl || '');
+    const photoValue = wishlistPhotoValue_(gift);
+    if (photoValue || !sameProduct) {
+      const column = wishlistPhotoColumn_(sheet, !!photoValue);
+      if (column) {
+        const photoCell = sheet.getRange(cells.getRow(), column);
+        if (gift.imageUrl || !sameProduct || !photoCell.getValue()) photoCell.setValue(photoValue);
+      }
     }
   }
   SpreadsheetApp.flush();
@@ -513,6 +526,76 @@ function wishlistProductPhotoUrl_(value) {
   const url = typeof value === 'string' ? value.trim() : '';
   return /^https:\/\/(?:m\.media-amazon\.com|images-na\.ssl-images-amazon\.com|target\.scene7\.com)\/[^\s"'<>\\]+$/i.test(url)
     && url.length <= 1500 ? url : '';
+}
+
+function wishlistPhotoRetryAt_(value, link) {
+  const marker = typeof value === 'string' && value.match(/^pending-photo:(\d{13})$/);
+  if (marker) return Number(marker[1]);
+  if (value != null && value !== '') return 0;
+  // Older rows have no marker. A saved Amazon link with a blank photo can also be retried.
+  const amazon = wishlistProductUrl_(link).startsWith('https://www.amazon.com/') || amazonShortProductUrl_(link);
+  return amazon ? 1 : 0;
+}
+
+function wishlistPhotoValue_(gift) {
+  return gift.imageUrl || (gift.photoChallenged ? 'pending-photo:' + Date.now() : '');
+}
+
+function retryWishlistPhotos_(properties, request, sessionKey) {
+  const getList = () => configuredWishlists_(properties).get(request.listId);
+  const matchesSource = list => list && request.listRevision === wishlistSourceRevision_(list, sessionKey);
+  const lease = 'pending-photo:' + (Date.now() + WISHLIST_PHOTO_RETRY_DELAY_MS);
+  const claimed = withWishlistLock_(() => {
+    const list = getList();
+    if (!matchesSource(list)) return { ok: false, code: 'list_changed' };
+    const sheet = wishlistGiftSheet_(list);
+    if (!sheet) return { ok: false, code: 'list_unavailable' };
+    const rows = wishlistGiftRows_(sheet);
+    if (!rows.length) return { ok: true, jobs: [] };
+    let column = wishlistPhotoColumn_(sheet);
+    const photos = column ? sheet.getRange(2, column, rows.length, 1).getValues() : [];
+    const jobs = [];
+    const now = Date.now();
+    for (const [index, [id, , link]] of rows.entries()) {
+      const due = wishlistPhotoRetryAt_(photos[index]?.[0], link);
+      if (!validWishlistId_(id) || !due || due > now) continue;
+      column ||= wishlistPhotoColumn_(sheet, true);
+      const cell = sheet.getRange(index + 2, column);
+      if (cell.getFormula()) continue;
+      cell.setValue(lease);
+      jobs.push({ id, link });
+      if (jobs.length === WISHLIST_PHOTO_RETRY_BATCH) break;
+    }
+    if (jobs.length) SpreadsheetApp.flush();
+    return { ok: true, jobs };
+  }, LockService.getScriptLock(), 0);
+  if (!claimed.ok) return claimed;
+
+  // Keep the stored shopping link for the comparison after the fetch.
+  const lookups = claimed.jobs.map(job => ({ ...job }));
+  fillWishlistProductDetails_(lookups);
+  const found = lookups.filter(gift => gift.imageUrl);
+  if (!found.length) return { ok: true, photos: {} };
+  const links = new Map(claimed.jobs.map(({ id, link }) => [id, link]));
+  return withWishlistLock_(() => {
+    const list = getList();
+    if (!matchesSource(list)) return { ok: false, code: 'list_changed' };
+    const sheet = wishlistGiftSheet_(list);
+    if (!sheet) return { ok: false, code: 'list_unavailable' };
+    const column = wishlistPhotoColumn_(sheet);
+    if (!column) return { ok: true, photos: {} };
+    const photos = Object.create(null);
+    for (const { id, imageUrl } of found) {
+      const cells = findWishlistGift_(sheet, id);
+      if (!cells || cells.getCell(1, 3).getValue() !== links.get(id)) continue;
+      const cell = sheet.getRange(cells.getRow(), column);
+      if (cell.getValue() !== lease || cell.getFormula()) continue;
+      cell.setValue(imageUrl);
+      photos[id] = imageUrl;
+    }
+    if (Object.keys(photos).length) SpreadsheetApp.flush();
+    return { ok: true, photos };
+  });
 }
 
 function validWishlistId_(id) {
@@ -595,11 +678,13 @@ function fillWishlistProductDetails_(gifts) {
       })));
       for (const [index, response] of responses.entries()) {
         const url = pending[index];
-        const product = response.getResponseCode() === 200
-          ? parseWishlistProduct_(response.getContentText().slice(0, 2000000), url)
-          : {};
+        const html = response.getContentText().slice(0, 2000000);
+        const challenged = url.startsWith('https://www.amazon.com/') &&
+          /\/errors\/validateCaptcha\b|<title>\s*Robot Check\s*<\/title>/i.test(html);
+        const product = challenged ? { challenged: true }
+          : response.getResponseCode() === 200 ? parseWishlistProduct_(html, url) : {};
         details.set(url, product);
-        cache.put(cacheKey(url), JSON.stringify(product), Object.keys(product).length ? 21600 : 600);
+        if (!challenged) cache.put(cacheKey(url), JSON.stringify(product), Object.keys(product).length ? 21600 : 600);
       }
     }
   } catch {
@@ -611,6 +696,7 @@ function fillWishlistProductDetails_(gifts) {
     if (!gift.name && product.name) gift.name = product.name;
     if (gift.price === '' && product.price != null) gift.price = product.price;
     if (!gift.imageUrl && product.imageUrl) gift.imageUrl = product.imageUrl;
+    if (product.challenged) gift.photoChallenged = true;
   }
 }
 
@@ -768,6 +854,7 @@ function listWishlistGifts_(sheet, lockHeld = false) {
       purchased: purchased === true,
       price: Number.isFinite(price) && price >= 0 ? price : null,
       imageUrl: wishlistProductPhotoUrl_(photos[index]?.[0]),
+      photoRetryAt: wishlistPhotoRetryAt_(photos[index]?.[0], link),
       priority: typeof rank === 'number' ? rank : PRIORITIES.normal,
       order: index,
     });
@@ -792,7 +879,7 @@ function listWishlistGifts_(sheet, lockHeld = false) {
     Number(left.purchased) - Number(right.purchased) ||
     (left.purchased ? 0 : left.priority - right.priority) ||
     left.order - right.order);
-  return gifts.map(({ id, name, url, purchased, price, imageUrl }) => ({ id, name, url, purchased, price, imageUrl }));
+  return gifts.map(({ priority, order, ...gift }) => gift);
 }
 
 function findWishlistGift_(sheet, id) {

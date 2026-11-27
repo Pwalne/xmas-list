@@ -659,6 +659,22 @@ function displayGifts(result, focusHeading = false) {
   renderGifts();
   finishOpeningWishlist();
   if (focusHeading) giftsHeading.focus();
+  if (result.photoRetryDue && selectedList) {
+    retryVisiblePhotos(selectedList.id, listRevision, gifts);
+  }
+}
+
+async function retryVisiblePhotos(listId, revision, displayedGifts) {
+  try {
+    const { photos } = await request('retry_photos', { listId, listRevision: revision });
+    if (gifts !== displayedGifts || listRevision !== revision) return;
+    for (const gift of displayedGifts) {
+      if (Object.hasOwn(photos, gift.id)) gift.imageUrl = photos[gift.id];
+    }
+    if (Object.keys(photos).length && !busy) renderGifts();
+  } catch {
+    // Pending photos can be retried on a later reload.
+  }
 }
 
 async function openWishlists(focusHeading = false) {
