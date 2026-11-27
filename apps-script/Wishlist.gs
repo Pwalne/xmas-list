@@ -6,7 +6,8 @@ const MAX_FAILED_ATTEMPTS = 12;
 
 const WISHLIST_SETTINGS = 'Wishlist settings';
 const SETTINGS_HEADERS = ['List ID', 'Child name', 'Spreadsheet URL or ID', 'Gift tab'];
-const ADMIN_ACTIONS = ['admin_unlock', 'admin_lists', 'admin_add_list', 'admin_edit_list', 'admin_remove_list', 'admin_add_gift'];
+const GIFT_ADMIN_ACTIONS = ['admin_add_gift', 'admin_get_gift', 'admin_edit_gift', 'admin_remove_gift'];
+const ADMIN_ACTIONS = ['admin_unlock', 'admin_lists', 'admin_add_list', 'admin_edit_list', 'admin_remove_list', ...GIFT_ADMIN_ACTIONS];
 
 // Run in the editor after setting WISHLIST_SPREADSHEET_ID.
 function setupWishlist() {
@@ -71,7 +72,7 @@ function doPost(event) {
       if (!validWishlistToken_(request.adminToken, adminKey, Date.now())) {
         return wishlistResponse_({ ok: false, code: 'admin_session_expired' });
       }
-      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request)));
+      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request, adminKey)));
     }
     if (request.action === 'unlock') {
       if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
@@ -89,7 +90,8 @@ function doPost(event) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
     }
 
-    const metadata = request.action === 'list' ? loadWishlistProductMetadata_(properties, request.listId) : new Map();
+    const lookupProducts = request.action === 'list' && request.skipLookup !== true;
+    const metadata = lookupProducts ? loadWishlistProductMetadata_(properties, request.listId) : new Map();
     return wishlistResponse_(withWishlistLock_(() => {
       const lists = configuredWishlists_(properties);
       if (request.action === 'directory') {
@@ -104,7 +106,10 @@ function doPost(event) {
       const sheet = wishlistGiftSheet_(list);
       if (!sheet) return { ok: false, code: 'list_unavailable' };
       if (request.action === 'purchase') return purchaseWishlistGift_(sheet, request.giftId);
-      return { ok: true, gifts: listWishlistGifts_(sheet, metadata), listRevision };
+      const rows = wishlistGiftRows_(sheet);
+      const needsMetadata = !lookupProducts && rows.some(([, name, link, , , price]) =>
+        (!String(name).trim() || price === '') && !!wishlistProductUrl_(link));
+      return { ok: true, gifts: listWishlistGifts_(sheet, metadata, rows), listRevision, needsMetadata };
     }));
   } catch (error) {
     console.error('Wishlist operation failed: ' + error.name);
@@ -185,7 +190,7 @@ function configuredWishlists_(properties) {
   return lists;
 }
 
-function manageWishlists_(properties, request) {
+function manageWishlists_(properties, request, adminKey) {
   const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
   const settings = SpreadsheetApp.openById(homeId).getSheetByName(WISHLIST_SETTINGS);
   if (!settings) return { ok: false, code: 'admin_unavailable' };
@@ -205,7 +210,11 @@ function manageWishlists_(properties, request) {
       return { ok: false, code: 'list_changed' };
     }
   }
-  if (request.action === 'admin_add_gift') return addWishlistGift_(existing, request);
+  if (GIFT_ADMIN_ACTIONS.includes(request.action)) {
+    return request.action === 'admin_add_gift'
+      ? addWishlistGift_(existing, request)
+      : editWishlistGift_(existing, request, adminKey);
+  }
   if (request.action === 'admin_remove_list') {
     settings.getRange(existing.row, 1, 1, SETTINGS_HEADERS.length).clearContent();
     SpreadsheetApp.flush();
@@ -240,18 +249,30 @@ function manageWishlists_(properties, request) {
   return { ok: true, list: { id, name: name.trim() } };
 }
 
-function addWishlistGift_(list, request) {
-  const { giftId, name, link, priority, price } = request;
-  if (typeof giftId !== 'string' || !/^[0-9a-f-]{36}$/.test(giftId) ||
-      typeof name !== 'string' || name.length > 200 ||
+function wishlistGiftInput_(request) {
+  const { name, link, priority, price } = request;
+  if (typeof name !== 'string' || name.length > 200 ||
       typeof link !== 'string' || link.length > 500 ||
       !['High', 'Normal', 'Low'].includes(priority) ||
       typeof price !== 'string' || (price && (!/^\d{1,9}(?:\.\d{1,2})?$/.test(price)))) {
-    return { ok: false, code: 'invalid_gift' };
+    return null;
   }
   const giftName = name.trim();
   const url = link.trim();
   if ((!giftName && !url) || (url && !/^https?:\/\/[\w.-]+(?::\d+)?(?:[/?#][^\s\\]*)?$/i.test(url))) {
+    return null;
+  }
+  return { name: giftName, link: url, priority, price: price ? Number(price) : '' };
+}
+
+function literalGiftText_(text) {
+  return /^[=']/.test(text) ? "'" + text : text;
+}
+
+function addWishlistGift_(list, request) {
+  const gift = wishlistGiftInput_(request);
+  const { giftId } = request;
+  if (!gift || typeof giftId !== 'string' || !/^[0-9a-f-]{36}$/.test(giftId)) {
     return { ok: false, code: 'invalid_gift' };
   }
   const sheet = wishlistGiftSheet_(list);
@@ -267,13 +288,50 @@ function addWishlistGift_(list, request) {
     if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
     const cells = sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length);
     if (!occupied(cells.getValues()[0]) && !cells.getFormulas()[0].some(Boolean)) {
-      const literalName = /^[=']/.test(giftName) ? "'" + giftName : giftName;
-      cells.setValues([[giftId, literalName, url, priority, false, price ? Number(price) : '']]);
+      cells.setValues([[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]]);
       SpreadsheetApp.flush();
       return { ok: true };
     }
     row++;
   }
+}
+
+function editWishlistGift_(list, request, adminKey) {
+  if (!validWishlistId_(request.giftId)) return { ok: false, code: 'invalid_gift' };
+  const sheet = wishlistGiftSheet_(list);
+  if (!sheet) return { ok: false, code: 'list_unavailable' };
+  const cells = findWishlistGift_(sheet, request.giftId);
+  if (!cells) return { ok: false, code: 'gift_missing' };
+  const [values] = cells.getValues();
+  const [id, name, link, priority, , price] = values;
+  if (id !== request.giftId || !wishlistGiftDetails_(name, link).name) {
+    return { ok: false, code: 'gift_missing' };
+  }
+  const [formulas] = cells.getFormulas();
+  const revision = signWishlist_(JSON.stringify([list.id, values, formulas]), adminKey);
+  const knownPriority = ['High', 'Normal', 'Low'].find(value => value.toLowerCase() === String(priority).trim().toLowerCase());
+  if (request.action === 'admin_get_gift') {
+    return { ok: true, gift: {
+      id, name: String(name), link: String(link), priority: knownPriority || 'Normal',
+      price: Number.isFinite(price) && price >= 0 ? String(price) : '',
+    }, revision };
+  }
+  if (request.revision !== revision) return { ok: false, code: 'gift_changed' };
+  if (request.action === 'admin_remove_gift') {
+    cells.clearContent();
+  } else {
+    const gift = wishlistGiftInput_(request);
+    if (!gift) return { ok: false, code: 'invalid_gift' };
+    const replacements = [id, gift.name, gift.link, gift.priority, values[4], gift.price];
+    const original = [id, String(name), String(link), knownPriority || 'Normal', values[4],
+      Number.isFinite(price) && price >= 0 ? price : ''];
+    const updated = values.map((value, i) => replacements[i] === original[i]
+      ? formulas[i] || (typeof value === 'string' ? literalGiftText_(value) : value)
+      : typeof replacements[i] === 'string' ? literalGiftText_(replacements[i]) : replacements[i]);
+    cells.setValues([updated]);
+  }
+  SpreadsheetApp.flush();
+  return { ok: true };
 }
 
 function wishlistSpreadsheetId_(source) {
@@ -470,8 +528,7 @@ function wishlistGiftRows_(sheet) {
   return count < 1 ? [] : sheet.getRange(2, 1, count, WISHLIST_HEADERS.length).getValues();
 }
 
-function listWishlistGifts_(sheet, metadata = new Map()) {
-  const rows = wishlistGiftRows_(sheet);
+function listWishlistGifts_(sheet, metadata = new Map(), rows = wishlistGiftRows_(sheet)) {
   const gifts = [];
   const existingIds = new Set(rows.map(row => row[0]).filter(validWishlistId_));
   const seenIds = new Set();
@@ -532,17 +589,21 @@ function listWishlistGifts_(sheet, metadata = new Map()) {
   return gifts.map(({ id, name, url, purchased, price }) => ({ id, name, url, purchased, price }));
 }
 
-function purchaseWishlistGift_(sheet, id) {
+function findWishlistGift_(sheet, id) {
   const count = sheet.getLastRow() - 1;
-  if (count < 1) return { ok: false, code: 'gift_missing' };
+  if (count < 1) return null;
   const matches = sheet.getRange(2, 1, count, 1).createTextFinder(id)
     .matchEntireCell(true).matchCase(true).findAll();
-  if (matches.length !== 1) return { ok: false, code: 'gift_missing' };
-  const row = matches[0].getRow();
-  const [currentId, name, link, , purchased] = sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
+  return matches.length === 1 ? sheet.getRange(matches[0].getRow(), 1, 1, WISHLIST_HEADERS.length) : null;
+}
+
+function purchaseWishlistGift_(sheet, id) {
+  const cells = findWishlistGift_(sheet, id);
+  if (!cells) return { ok: false, code: 'gift_missing' };
+  const [currentId, name, link, , purchased] = cells.getValues()[0];
   if (currentId !== id || !wishlistGiftDetails_(name, link).name) return { ok: false, code: 'gift_missing' };
   if (purchased !== true) {
-    sheet.getRange(row, 5).setValue(true);
+    cells.getCell(1, 5).setValue(true);
     SpreadsheetApp.flush();
   }
   return { ok: true, alreadyPurchased: purchased === true };

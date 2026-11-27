@@ -94,9 +94,20 @@ input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
 #add-wishlist input, #add-gift input, #add-gift select { margin-bottom: .75rem; }
 #add-gift p { margin: .35rem 0 .85rem; }
 .gift-form-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
-#manage-list-controls { margin-top: 1rem; }
+#open-add-gift {
+  position: fixed;
+  inset-inline-end: max(1rem, env(safe-area-inset-right));
+  inset-block-end: max(1rem, env(safe-area-inset-bottom));
+  z-index: 2;
+  padding-inline: 1.1rem;
+  font-size: 1rem;
+  box-shadow: 0 .3rem 1rem #14382f35;
+}
+.wishlist:has(#open-add-gift:not([hidden])) { padding-bottom: 5.5rem; }
+#wishlist-admin { max-height: calc(100% - 2rem); overflow-y: auto; }
+#wishlist-admin form { margin-bottom: .75rem; }
 #wishlist-form-heading { margin: .75rem 0; }
-#remove-wishlist-dialog {
+#remove-wishlist-dialog, #wishlist-admin {
   max-width: min(28rem, calc(100% - 2rem));
   padding: 1.4rem;
   border: 1px solid #c4d1c3;
@@ -104,7 +115,7 @@ input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
   color: inherit;
   background: #fffef9;
 }
-#remove-wishlist-dialog::backdrop { background: #14382f70; }
+#remove-wishlist-dialog::backdrop, #wishlist-admin::backdrop { background: #14382f70; }
 #remove-wishlist-message { margin: .65rem 0 1rem; }
 #sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
 .actions { flex-wrap: wrap; }
@@ -132,8 +143,8 @@ button:disabled { opacity: .6; cursor: default; }
 .status { margin: .7rem 0 0; min-height: 0; color: #385b49; }
 .status:empty { display: none; }
 .status.error { color: #942e3e; }
-#wishlist-tabs, .wishlist-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
-:is(#wishlist-tabs, .wishlist-tabs) button[aria-pressed="true"] { background: #244f3c; color: #fff; }
+#wishlist-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+#wishlist-tabs button[aria-pressed="true"] { background: #244f3c; color: #fff; }
 .list-header, .actions { display: flex; align-items: center; gap: .5rem; }
 .list-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: .85rem; }
 .gift-list { list-style: none; margin: 0; padding: 0; }
@@ -157,7 +168,12 @@ button:disabled { opacity: .6; cursor: default; }
   justify-content: flex-end;
   gap: .75rem;
   margin-inline-start: auto;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
+.gift-admin-actions { display: flex; flex: none; gap: .35rem; }
+.gift-admin-actions button { width: 2.75rem; padding: 0; font-size: 1.35rem; }
+.gift-admin-actions .gift-remove { color: #9c4037; }
 .shop-link {
   display: flex;
   align-items: center;

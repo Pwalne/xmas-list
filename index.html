@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=10">
-  <script src="./wishlist.js?v=10" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=12">
+  <script src="./wishlist.js?v=12" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -45,7 +45,9 @@
         <h2 id="gifts-heading" tabindex="-1">Gift ideas</h2>
         <div class="actions">
           <button id="refresh" class="secondary" type="button">Refresh</button>
-          <button id="manage-wishlists" class="secondary" type="button" aria-expanded="false"
+          <button id="edit-connected-list" class="secondary" type="button" hidden>Edit</button>
+          <button id="remove-connected-list" class="secondary" type="button" hidden>Remove</button>
+          <button id="manage-wishlists" class="secondary" type="button"
             aria-controls="wishlist-admin">Manage wishlists</button>
         </div>
       </div>
@@ -57,26 +59,19 @@
       </section>
     </section>
 
-    <section id="wishlist-admin" class="panel entry" aria-labelledby="admin-heading" hidden>
+    <button id="open-add-gift" type="button" aria-haspopup="dialog" aria-controls="wishlist-admin" hidden>Add gift</button>
+  </main>
+
+    <dialog id="wishlist-admin" class="panel entry" aria-labelledby="admin-heading">
       <h2 id="admin-heading">Manage wishlists</h2>
-      <form id="admin-unlock">
+      <form id="admin-unlock" hidden>
         <label for="admin-passphrase">Admin passphrase</label>
         <div class="entry-fields">
           <input id="admin-passphrase" type="password" required maxlength="256" autocomplete="off">
           <button type="submit">Unlock settings</button>
         </div>
       </form>
-      <nav id="managed-wishlists" class="wishlist-tabs" aria-label="Manage spreadsheet tabs" hidden></nav>
-      <div id="manage-list-controls" hidden>
-        <div class="list-header">
-          <h3 id="managed-list-heading"></h3>
-          <div class="actions">
-            <button id="edit-connected-list" class="secondary" type="button">Edit</button>
-            <button id="remove-connected-list" class="secondary" type="button">Remove</button>
-          </div>
-        </div>
-        <form id="add-gift">
-          <h3>Add a gift</h3>
+        <form id="add-gift" hidden>
           <p>Enter a gift name or paste a shopping link.</p>
           <label for="new-gift-name">Gift name</label>
           <input id="new-gift-name" name="name" type="text" maxlength="200">
@@ -98,9 +93,7 @@
           </div>
           <button type="submit">Add gift</button>
         </form>
-      </div>
       <form id="add-wishlist" hidden>
-        <h3 id="wishlist-form-heading">Add a wishlist</h3>
         <label for="child-name">Child name</label>
         <input id="child-name" name="name" type="text" required maxlength="80">
         <label for="sheet-source">Google Sheet link or ID</label>
@@ -110,11 +103,10 @@
         <label for="gift-tab">Gift tab name</label>
         <input id="gift-tab" name="tab" type="text" required maxlength="100" placeholder="Gifts">
         <button id="save-wishlist" type="submit">Add wishlist</button>
-        <button id="cancel-wishlist-edit" class="secondary" type="button" hidden>Cancel edit</button>
       </form>
       <p id="admin-status" class="status" role="status"></p>
-    </section>
-  </main>
+      <button id="cancel-admin-dialog" class="secondary" type="button">Cancel</button>
+    </dialog>
 
   <dialog id="remove-wishlist-dialog" aria-labelledby="remove-wishlist-heading">
     <h2 id="remove-wishlist-heading">Remove wishlist?</h2>
@@ -141,6 +133,10 @@
           <span>Purchased</span>
         </label>
         <span class="purchased-label" hidden>Purchased</span>
+        <div class="gift-admin-actions" hidden>
+          <button class="secondary gift-edit" type="button">✎</button>
+          <button class="secondary gift-remove" type="button">×</button>
+        </div>
       </div>
     </li>
   </template>
