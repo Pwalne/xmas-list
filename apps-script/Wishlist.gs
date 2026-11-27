@@ -72,7 +72,20 @@ function doPost(event) {
       if (!validWishlistToken_(request.adminToken, adminKey, Date.now())) {
         return wishlistResponse_({ ok: false, code: 'admin_session_expired' });
       }
-      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request, adminKey)));
+      let newGift;
+      if (request.action === 'admin_add_gift') {
+        newGift = wishlistGiftInput_(request);
+        if (!newGift || typeof request.giftId !== 'string' || !/^[0-9a-f-]{36}$/.test(request.giftId)) {
+          return wishlistResponse_({ ok: false, code: 'invalid_gift' });
+        }
+        // Fetch before taking the write lock so a slow retailer cannot block shoppers.
+        if (!newGift.name || newGift.price === '') {
+          const details = fetchWishlistProduct_(newGift.link);
+          if (!newGift.name && details.name) newGift.name = details.name;
+          if (newGift.price === '' && details.price != null) newGift.price = details.price;
+        }
+      }
+      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request, adminKey, newGift)));
     }
     if (request.action === 'unlock') {
       if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
@@ -90,8 +103,6 @@ function doPost(event) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
     }
 
-    const lookupProducts = request.action === 'list' && request.skipLookup !== true;
-    const metadata = lookupProducts ? loadWishlistProductMetadata_(properties, request.listId) : new Map();
     return wishlistResponse_(withWishlistLock_(() => {
       const lists = configuredWishlists_(properties);
       if (request.action === 'directory') {
@@ -106,10 +117,7 @@ function doPost(event) {
       const sheet = wishlistGiftSheet_(list);
       if (!sheet) return { ok: false, code: 'list_unavailable' };
       if (request.action === 'purchase') return purchaseWishlistGift_(sheet, request.giftId);
-      const rows = wishlistGiftRows_(sheet);
-      const needsMetadata = !lookupProducts && rows.some(([, name, link, , , price]) =>
-        (!String(name).trim() || price === '') && !!wishlistProductUrl_(link));
-      return { ok: true, gifts: listWishlistGifts_(sheet, metadata, rows), listRevision, needsMetadata };
+      return { ok: true, gifts: listWishlistGifts_(sheet), listRevision };
     }));
   } catch (error) {
     console.error('Wishlist operation failed: ' + error.name);
@@ -190,7 +198,7 @@ function configuredWishlists_(properties) {
   return lists;
 }
 
-function manageWishlists_(properties, request, adminKey) {
+function manageWishlists_(properties, request, adminKey, newGift) {
   const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
   const settings = SpreadsheetApp.openById(homeId).getSheetByName(WISHLIST_SETTINGS);
   if (!settings) return { ok: false, code: 'admin_unavailable' };
@@ -212,7 +220,7 @@ function manageWishlists_(properties, request, adminKey) {
   }
   if (GIFT_ADMIN_ACTIONS.includes(request.action)) {
     return request.action === 'admin_add_gift'
-      ? addWishlistGift_(existing, request)
+      ? addWishlistGift_(existing, request.giftId, newGift)
       : editWishlistGift_(existing, request, adminKey);
   }
   if (request.action === 'admin_remove_list') {
@@ -269,12 +277,7 @@ function literalGiftText_(text) {
   return /^[=']/.test(text) ? "'" + text : text;
 }
 
-function addWishlistGift_(list, request) {
-  const gift = wishlistGiftInput_(request);
-  const { giftId } = request;
-  if (!gift || typeof giftId !== 'string' || !/^[0-9a-f-]{36}$/.test(giftId)) {
-    return { ok: false, code: 'invalid_gift' };
-  }
+function addWishlistGift_(list, giftId, gift) {
   const sheet = wishlistGiftSheet_(list);
   if (!sheet) return { ok: false, code: 'list_unavailable' };
   const rows = wishlistGiftRows_(sheet);
@@ -381,54 +384,27 @@ function wishlistProductUrl_(link) {
   return '';
 }
 
-function loadWishlistProductMetadata_(properties, listId) {
-  const lists = configuredWishlists_(properties);
-  const list = lists.get(listId ?? (lists.size === 1 ? lists.keys().next().value : ''));
-  const sheet = list && wishlistGiftSheet_(list);
-  const found = new Map();
-  if (!sheet) return found;
+function fetchWishlistProduct_(link) {
+  const url = wishlistProductUrl_(link);
+  if (!url) return {};
 
-  const urls = [...new Set(wishlistGiftRows_(sheet)
-    .filter(([, name, , , , price]) => !String(name).trim() || price === '')
-    .map(([, , link]) => wishlistProductUrl_(link)).filter(Boolean))];
-  if (!urls.length) return found;
-
+  let details = {};
   try {
     const cache = CacheService.getScriptCache();
-    const pending = [];
-    const keys = urls.map(url => 'product:' + url);
-    // Limit each cache call as well as the number of outbound requests.
-    for (let start = 0; start < urls.length; start += 100) {
-      const cached = cache.getAll(keys.slice(start, start + 100));
-      for (const url of urls.slice(start, start + 100)) {
-        const value = cached['product:' + url];
-        if (value) found.set(url, JSON.parse(value));
-        else if (pending.length < 4) pending.push(url);
-      }
+    const key = 'product:' + url;
+    const cached = cache.get(key);
+    if (cached) return JSON.parse(cached);
+    const response = UrlFetchApp.fetch(url, {
+      followRedirects: false, muteHttpExceptions: true, timeoutSeconds: 5,
+    });
+    if (response.getResponseCode() === 200) {
+      details = parseWishlistProduct_(response.getContentText().slice(0, 2000000));
     }
-    if (pending.length) {
-      let responses;
-      try {
-        responses = UrlFetchApp.fetchAll(pending.map(url => ({
-          url, followRedirects: false, muteHttpExceptions: true, timeoutSeconds: 5,
-        })));
-      } catch {
-        pending.forEach(url => cache.put('product:' + url, '{}', 600));
-        return found;
-      }
-      pending.forEach((url, index) => {
-        const response = responses[index];
-        const details = response.getResponseCode() === 200
-          ? parseWishlistProduct_(response.getContentText().slice(0, 2000000))
-          : {};
-        cache.put('product:' + url, JSON.stringify(details), 21600);
-        found.set(url, details);
-      });
-    }
+    cache.put(key, JSON.stringify(details), Object.keys(details).length ? 21600 : 600);
   } catch {
-    // Product lookups are optional. The normal list remains usable.
+    // The gift can still be saved when retailer details are unavailable.
   }
-  return found;
+  return details;
 }
 
 function parseWishlistProduct_(html) {
@@ -528,39 +504,13 @@ function wishlistGiftRows_(sheet) {
   return count < 1 ? [] : sheet.getRange(2, 1, count, WISHLIST_HEADERS.length).getValues();
 }
 
-function listWishlistGifts_(sheet, metadata = new Map(), rows = wishlistGiftRows_(sheet)) {
+function listWishlistGifts_(sheet) {
+  const rows = wishlistGiftRows_(sheet);
   const gifts = [];
   const existingIds = new Set(rows.map(row => row[0]).filter(validWishlistId_));
   const seenIds = new Set();
   let wroteToSheet = false;
   rows.forEach(([id, value, link, priority, purchased, price], index) => {
-    const lookup = metadata.get(wishlistProductUrl_(link));
-    if (lookup) {
-      // The retailer request has finished. Re-read the cells before filling blanks.
-      const row = index + 2;
-      const [currentId, currentName, currentLink, , , currentPrice] =
-        sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
-      if (currentId === id && currentLink === link) {
-        value = currentName;
-        price = currentPrice;
-        if (!String(value).trim() && lookup.name) {
-          const nameCell = sheet.getRange(row, 2);
-          if (!nameCell.getFormula()) {
-            nameCell.setRichTextValue(SpreadsheetApp.newRichTextValue().setText(lookup.name).build());
-            value = lookup.name;
-            wroteToSheet = true;
-          }
-        }
-        if (price === '' && lookup.price != null) {
-          const priceCell = sheet.getRange(row, 6);
-          if (!priceCell.getFormula()) {
-            priceCell.setValue(lookup.price);
-            price = lookup.price;
-            wroteToSheet = true;
-          }
-        }
-      }
-    }
     const { name, url } = wishlistGiftDetails_(value, link);
     if (!name) return;
     if (!validWishlistId_(id) || seenIds.has(id)) {

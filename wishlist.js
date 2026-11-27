@@ -44,7 +44,6 @@ const targetProductPhotos = new Map([
 let token = '';
 let gifts = [];
 let listRevision;
-let giftViewRevision = 0;
 let busy = false;
 let adminToken = '';
 let editingList = null;
@@ -109,7 +108,6 @@ function storeSession(value) {
 
 function setBusy(value) {
   busy = value;
-  if (value) giftViewRevision++;
   unlockButton.disabled = value || !endpoint;
   passphrase.readOnly = value;
   refresh.disabled = value;
@@ -553,7 +551,7 @@ function reportError(error, fallback) {
 
 async function loadGifts(focusHeading = false) {
   const listId = selectedList?.id;
-  const revision = ++giftViewRevision;
+  // Older Apps Script deployments still need the flag to skip retailer requests.
   const result = await request('list', { listId, skipLookup: true });
   gifts = result.gifts;
   listRevision = result.listRevision;
@@ -563,18 +561,6 @@ async function loadGifts(focusHeading = false) {
   renderGifts();
   finishOpeningWishlist();
   if (focusHeading) giftsHeading.focus();
-  if (result.needsMetadata) {
-    request('list', { listId }).then(updated => {
-      if (revision !== giftViewRevision || listId !== selectedList?.id) return;
-      // A list may have been repointed while the retailer lookup was running.
-      if (updated.listRevision !== result.listRevision) return;
-      if (JSON.stringify(updated.gifts) === JSON.stringify(gifts)) return;
-      gifts = updated.gifts;
-      renderGifts();
-    }).catch(() => {
-      // The saved gifts remain on screen if a retailer lookup fails.
-    });
-  }
 }
 
 async function openWishlists(focusHeading = false) {

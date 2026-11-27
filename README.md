@@ -19,13 +19,12 @@ Clear the Sheet's **Purchased** checkbox to undo an accidental purchase. Shopper
 see gift additions, edits, and checkmark resets the next time they load or refresh
 the list.
 
-When a wishlist is opened, the app looks up blank gift names and prices for
-direct Amazon.com and Target product links. It saves the product title and an
-unambiguous US-dollar price when the retailer makes them available. The
-lookup runs in small batches, so additional rows may fill in after refreshing.
-The app preserves existing values and formulas. It does not keep saved prices
-in sync with the store. If a retailer blocks the lookup or omits the price,
-enter it manually in **Price**.
+When an admin adds a gift through the website, the app checks direct Amazon.com
+and Target product links for a missing name or price. It saves any title or
+unambiguous US-dollar price it finds and preserves values you enter.
+Opening or refreshing a wishlist uses saved values. For rows entered directly
+in Google Sheets, fill in the name and price there if needed. A blank name
+uses the shopping link as a fallback, and a blank price stays blank.
 
 ## Adding a child's wishlist
 
