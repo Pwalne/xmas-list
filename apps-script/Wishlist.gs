@@ -6,7 +6,8 @@ const MAX_FAILED_ATTEMPTS = 12;
 
 const WISHLIST_SETTINGS = 'Wishlist settings';
 const SETTINGS_HEADERS = ['List ID', 'Child name', 'Spreadsheet URL or ID', 'Gift tab'];
-const GIFT_ADMIN_ACTIONS = ['admin_add_gift', 'admin_get_gift', 'admin_edit_gift', 'admin_remove_gift'];
+const GIFT_ADMIN_ACTIONS = ['admin_add_gift', 'admin_add_gifts', 'admin_get_gift', 'admin_edit_gift', 'admin_remove_gift'];
+const WISHLIST_BATCH_LIMIT = 25;
 const ADMIN_ACTIONS = ['admin_unlock', 'admin_lists', 'admin_open', 'admin_add_list', 'admin_edit_list', 'admin_remove_list', ...GIFT_ADMIN_ACTIONS];
 
 // Run in the editor after setting WISHLIST_SPREADSHEET_ID.
@@ -30,7 +31,7 @@ function doGet() {
 
 function doPost(event) {
   const body = event && event.postData && event.postData.contents;
-  if (typeof body !== 'string' || !body || body.length > 2048) {
+  if (typeof body !== 'string' || !body || body.length > 48000) {
     return wishlistResponse_({ ok: false, code: 'invalid_request' });
   }
 
@@ -41,6 +42,9 @@ function doPost(event) {
     return wishlistResponse_({ ok: false, code: 'invalid_request' });
   }
   if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    return wishlistResponse_({ ok: false, code: 'invalid_request' });
+  }
+  if (body.length > 2048 && request.action !== 'admin_add_gifts') {
     return wishlistResponse_({ ok: false, code: 'invalid_request' });
   }
 
@@ -256,9 +260,14 @@ function manageWishlists_(properties, request, adminKey, sessionKey, newGift) {
   if (GIFT_ADMIN_ACTIONS.includes(request.action)) {
     const sheet = wishlistGiftSheet_(existing);
     if (!sheet) return { ok: false, code: 'list_unavailable' };
-    const result = request.action === 'admin_add_gift'
-      ? addWishlistGift_(sheet, request.giftId, newGift)
-      : editWishlistGift_(sheet, existing.id, request, adminKey);
+    let result;
+    if (request.action === 'admin_add_gifts') {
+      result = addWishlistGifts_(sheet, request.gifts);
+    } else if (request.action === 'admin_add_gift') {
+      result = addWishlistGift_(sheet, request.giftId, newGift);
+    } else {
+      result = editWishlistGift_(sheet, existing.id, request, adminKey);
+    }
     if (!result.ok || !request.includeView || request.action === 'admin_get_gift') return result;
     try {
       return { ...result, view: wishlistView_(existing, sessionKey, sheet) };
@@ -323,24 +332,77 @@ function literalGiftText_(text) {
   return /^[=']/.test(text) ? "'" + text : text;
 }
 
+function wishlistRowOccupied_(row) {
+  return row.some((value, col) => value !== '' && !(col === 4 && value === false));
+}
+
 function addWishlistGift_(sheet, giftId, gift) {
   const rows = wishlistGiftRows_(sheet);
   if (rows.some(row => row[0] === giftId)) return { ok: true };
 
-  const occupied = row => row.some((value, col) => value !== '' && !(col === 4 && value === false));
   let end = rows.length;
-  while (end && !occupied(rows[end - 1])) end--;
+  while (end && !wishlistRowOccupied_(rows[end - 1])) end--;
   let row = end + 2;
   for (;;) {
     if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
     const cells = sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length);
-    if (!occupied(cells.getValues()[0]) && !cells.getFormulas()[0].some(Boolean)) {
+    if (!wishlistRowOccupied_(cells.getValues()[0]) && !cells.getFormulas()[0].some(Boolean)) {
       cells.setValues([[giftId, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]]);
       SpreadsheetApp.flush();
       return { ok: true };
     }
     row++;
   }
+}
+
+function addWishlistGifts_(sheet, entries) {
+  if (!Array.isArray(entries) || !entries.length || entries.length > WISHLIST_BATCH_LIMIT) {
+    return { ok: false, code: 'invalid_gift_batch' };
+  }
+  const inputIds = new Set();
+  const validated = [];
+  for (const entry of entries) {
+    const id = entry?.giftId;
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id) || inputIds.has(id)) {
+      return { ok: false, code: 'invalid_gift_batch' };
+    }
+    const gift = wishlistGiftInput_(entry);
+    if (!gift) return { ok: false, code: 'invalid_gift_batch' };
+    inputIds.add(id);
+    validated.push({ id, ...gift });
+  }
+
+  const rows = wishlistGiftRows_(sheet);
+  const knownIds = new Set(rows.map(([id]) => id));
+  const linkKey = link => wishlistProductUrl_(link) || String(link).trim();
+  const seenLinks = new Set(rows.map(([, , link]) => linkKey(link)).filter(Boolean));
+  const additions = [];
+  for (const gift of validated) {
+    const key = linkKey(gift.link);
+    if (knownIds.has(gift.id) || (key && seenLinks.has(key))) continue;
+    if (key) seenLinks.add(key);
+    additions.push([gift.id, literalGiftText_(gift.name), gift.link, gift.priority, false, gift.price]);
+  }
+  if (additions.length) {
+    let end = rows.length;
+    while (end && !wishlistRowOccupied_(rows[end - 1])) end--;
+    // Keep formulas that appear blank, along with the existing checkbox formatting.
+    let start = end + 2;
+    if (rows.length > end) {
+      const formulas = sheet.getRange(start, 1, rows.length - end, WISHLIST_HEADERS.length).getFormulas();
+      for (let index = formulas.length - 1; index >= 0; index--) {
+        if (!formulas[index].some(Boolean)) continue;
+        start += index + 1;
+        break;
+      }
+    }
+    const maxRows = sheet.getMaxRows();
+    const extra = start + additions.length - 1 - maxRows;
+    if (extra > 0) sheet.insertRowsAfter(maxRows, extra);
+    sheet.getRange(start, 1, additions.length, WISHLIST_HEADERS.length).setValues(additions);
+    SpreadsheetApp.flush();
+  }
+  return { ok: true, added: additions.length, skipped: validated.length - additions.length };
 }
 
 function editWishlistGift_(sheet, listId, request, adminKey) {

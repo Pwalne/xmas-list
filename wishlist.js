@@ -25,6 +25,11 @@ const giftAddFooter = document.querySelector('#gift-add-footer');
 const editConnectedList = document.querySelector('#edit-connected-list');
 const removeConnectedList = document.querySelector('#remove-connected-list');
 const addGiftForm = document.querySelector('#add-gift');
+const openBulkAdd = document.querySelector('#open-bulk-add');
+const bulkGiftForm = document.querySelector('#bulk-add-gifts');
+const bulkGiftLines = document.querySelector('#bulk-gift-lines');
+const bulkGiftPreview = document.querySelector('#bulk-gift-preview');
+const saveBulkGifts = document.querySelector('#save-bulk-gifts');
 const saveWishlist = document.querySelector('#save-wishlist');
 const removeDialog = document.querySelector('#remove-wishlist-dialog');
 const removalHeading = document.querySelector('#remove-wishlist-heading');
@@ -49,6 +54,7 @@ let adminToken = '';
 let editingList = null;
 let managedLists = [];
 let pendingGiftId;
+let bulkGifts = [];
 let removingList = null;
 let editingGift = null;
 let removingGift = null;
@@ -67,6 +73,7 @@ const errors = {
   admin_session_expired: 'Admin access expired. Enter the admin passphrase again.',
   invalid_list_settings: 'Enter a child name, a valid Google Sheet link or ID if needed, and the exact gift tab name.',
   invalid_gift: 'Enter a gift name or a valid shopping link, and a nonnegative price with up to two decimal places if needed.',
+  invalid_gift_batch: 'Check the pasted gift names, shopping links, and prices, then preview the gifts again.',
   list_already_added: 'That gift tab is already connected.',
   list_changed: 'This wishlist changed since you opened settings. Close and reopen settings, then try again.',
 };
@@ -117,6 +124,7 @@ function setBusy(value) {
   removeConnectedList.disabled = value;
   adminPanel.querySelectorAll('button').forEach(button => { button.disabled = value; });
   addGiftForm.querySelectorAll('input, select').forEach(field => { field.disabled = value; });
+  bulkGiftLines.readOnly = value;
   confirmRemoval.disabled = value;
   wishlistTabs.querySelectorAll('button').forEach(button => { button.disabled = value; });
   available.querySelectorAll('input').forEach(input => { input.disabled = value; });
@@ -306,6 +314,8 @@ function closeAdmin() {
   adminForm.reset();
   addListForm.reset();
   addGiftForm.reset();
+  bulkGiftForm.reset();
+  clearBulkPreview();
   adminPanel.close();
   renderWishlistTabs();
   selectWishlist(selectedList?.id);
@@ -313,7 +323,7 @@ function closeAdmin() {
 
 function showAdminForm(form, heading, field) {
   adminHeading.textContent = heading;
-  for (const candidate of [adminForm, addListForm, addGiftForm]) candidate.hidden = candidate !== form;
+  for (const candidate of [adminForm, addListForm, addGiftForm, bulkGiftForm]) candidate.hidden = candidate !== form;
   adminStatus.textContent = '';
   if (!adminPanel.open) adminPanel.showModal();
   field.focus();
@@ -417,8 +427,101 @@ openAddGift.addEventListener('click', () => {
   pendingGiftId = undefined;
   editingGift = null;
   addGiftForm.reset();
+  openBulkAdd.hidden = false;
   addGiftForm.querySelector('button[type="submit"]').textContent = 'Add gift';
   showAdminForm(addGiftForm, 'Add a gift to ' + list.name, addGiftForm.elements.name);
+});
+
+function clearBulkPreview() {
+  bulkGifts = [];
+  bulkGiftPreview.replaceChildren();
+  bulkGiftPreview.hidden = true;
+  saveBulkGifts.hidden = true;
+}
+
+openBulkAdd.addEventListener('click', () => {
+  const list = selectedManagedList();
+  if (busy || !adminToken || !list) return;
+  bulkGiftForm.reset();
+  clearBulkPreview();
+  showAdminForm(bulkGiftForm, 'Bulk add gifts to ' + list.name, bulkGiftLines);
+});
+
+bulkGiftLines.addEventListener('input', () => {
+  clearBulkPreview();
+  adminStatus.textContent = '';
+});
+
+function parseBulkGifts(text) {
+  const entries = [];
+  const lines = text.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    const columns = line.split('\t').map(column => column.trim());
+    let [name, link = '', price = ''] = columns;
+    if (columns.length === 1 && /^https?:\/\//i.test(name)) [name, link] = ['', name];
+    price = price.replace(/^\$/, '');
+    if (columns.length > 3 || (!name && !link) || name.length > 200 || link.length > 500 ||
+        (link && !/^https?:\/\/[\w.-]+(?::\d+)?(?:[/?#][^\s\\]*)?$/i.test(link)) ||
+        (price && !/^\d{1,9}(?:\.\d{1,2})?$/.test(price))) {
+      throw new Error('Check the name, shopping link, or price on line ' + (index + 1) + '.');
+    }
+    entries.push({ name, link, price, priority: 'Normal', giftId: crypto.randomUUID() });
+  }
+  if (!entries.length || entries.length > 25) throw new Error('Enter between 1 and 25 gifts.');
+  return entries;
+}
+
+document.querySelector('#preview-bulk-gifts').addEventListener('click', () => {
+  if (busy) return;
+  if (bulkGifts.length) {
+    saveBulkGifts.focus();
+    return;
+  }
+  try {
+    bulkGifts = parseBulkGifts(bulkGiftLines.value);
+    for (const gift of bulkGifts) {
+      const preview = document.createElement('li');
+      preview.textContent = (gift.name || gift.link) + (gift.price ? ' · ' + priceFormat.format(Number(gift.price)) : '');
+      bulkGiftPreview.append(preview);
+    }
+    bulkGiftPreview.hidden = false;
+    saveBulkGifts.hidden = false;
+    saveBulkGifts.textContent = bulkGifts.length === 1 ? 'Add 1 gift' : 'Add ' + bulkGifts.length + ' gifts';
+    adminStatus.textContent = '';
+    saveBulkGifts.focus();
+  } catch (error) {
+    adminStatus.textContent = error.message;
+  }
+});
+
+bulkGiftForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const list = selectedManagedList();
+  if (busy || !adminToken || !list || !bulkGifts.length) return;
+  setBusy(true);
+  adminStatus.textContent = 'Saving gifts…';
+  try {
+    const result = await request('admin_add_gifts', {
+      adminToken, listId: list.id, previous: JSON.stringify(list), gifts: bulkGifts, includeView: true,
+    });
+    bulkGiftForm.reset();
+    clearBulkPreview();
+    adminPanel.close();
+    const added = result.added + (result.added === 1 ? ' gift added.' : ' gifts added.');
+    showStatus(added + (result.skipped ? ' Skipped ' + result.skipped + ' already-added items.' : ''));
+    try {
+      if (result.view) displayGifts(result.view);
+      else await loadGifts();
+    } catch (error) {
+      reportError(error, added + ' Use Refresh to load the updated list.');
+    }
+  } catch (error) {
+    reportAdminError(error, 'Couldn’t save the gifts. Try again.');
+  } finally {
+    setBusy(false);
+    if (!adminPanel.open) openAddGift.focus();
+  }
 });
 
 async function openGiftAdmin(gift, removing) {
@@ -438,6 +541,7 @@ async function openGiftAdmin(gift, removing) {
     } else {
       editingGift = result;
       addGiftForm.reset();
+      openBulkAdd.hidden = true;
       for (const field of ['name', 'link', 'priority', 'price']) {
         addGiftForm.elements[field].value = result.gift[field];
       }

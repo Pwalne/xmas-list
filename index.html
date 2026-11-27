@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=14">
-  <script src="./wishlist.js?v=16" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=15">
+  <script src="./wishlist.js?v=17" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -93,8 +93,21 @@
               <input id="new-gift-price" name="price" type="number" min="0" max="999999999.99" step=".01" inputmode="decimal">
             </div>
           </div>
-          <button type="submit">Add gift</button>
+          <div class="actions">
+            <button type="submit">Add gift</button>
+            <button id="open-bulk-add" class="secondary" type="button">Bulk add</button>
+          </div>
         </form>
+      <form id="bulk-add-gifts" hidden>
+        <label for="bulk-gift-lines">Gifts <span class="required-label">(required)</span></label>
+        <textarea id="bulk-gift-lines" rows="7" maxlength="20000" required aria-describedby="bulk-gift-help"></textarea>
+        <p id="bulk-gift-help">Paste up to 25 names or product links, one per line. You can also paste spreadsheet rows in Name, Shopping link, Price order.</p>
+        <div class="actions">
+          <button id="preview-bulk-gifts" class="secondary" type="button">Preview gifts</button>
+          <button id="save-bulk-gifts" type="submit" hidden>Add gifts</button>
+        </div>
+        <ol id="bulk-gift-preview" aria-label="Gifts to add" hidden></ol>
+      </form>
       <form id="add-wishlist" hidden>
         <label for="child-name">Child name <span class="required-label">(required)</span></label>
         <input id="child-name" name="name" type="text" required maxlength="80">
