@@ -82,19 +82,23 @@ function doPost(event) {
         return wishlistResponse_({ ok: false, code: 'admin_session_expired' });
       }
       let newGift;
+      let batchGifts;
       if (request.action === 'admin_add_gift') {
         newGift = wishlistGiftInput_(request);
         if (!newGift || typeof request.giftId !== 'string' || !/^[0-9a-f-]{36}$/.test(request.giftId)) {
           return wishlistResponse_({ ok: false, code: 'invalid_gift' });
         }
         // Fetch before taking the write lock so a slow retailer cannot block shoppers.
-        if (!newGift.name || newGift.price === '') {
-          const details = fetchWishlistProduct_(newGift.link);
-          if (!newGift.name && details.name) newGift.name = details.name;
-          if (newGift.price === '' && details.price != null) newGift.price = details.price;
-        }
+        fillWishlistProductDetails_([newGift]);
       }
-      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request, adminKey, sessionKey, newGift)));
+      if (request.action === 'admin_add_gifts') {
+        batchGifts = validateWishlistGiftBatch_(request.gifts);
+        if (!batchGifts) return wishlistResponse_({ ok: false, code: 'invalid_gift_batch' });
+        // Fetch outside the write lock. A retailer failure must not prevent saving.
+        fillWishlistProductDetails_(batchGifts);
+      }
+      return wishlistResponse_(withWishlistLock_(() =>
+        manageWishlists_(properties, request, adminKey, sessionKey, newGift, batchGifts)));
     }
     if (request.action === 'unlock') {
       if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
@@ -234,7 +238,7 @@ function readConfiguredWishlists_(homeId, settings) {
   return lists;
 }
 
-function manageWishlists_(properties, request, adminKey, sessionKey, newGift) {
+function manageWishlists_(properties, request, adminKey, sessionKey, newGift, batchGifts) {
   const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
   const settings = SpreadsheetApp.openById(homeId).getSheetByName(WISHLIST_SETTINGS);
   if (!settings) return { ok: false, code: 'admin_unavailable' };
@@ -262,7 +266,7 @@ function manageWishlists_(properties, request, adminKey, sessionKey, newGift) {
     if (!sheet) return { ok: false, code: 'list_unavailable' };
     let result;
     if (request.action === 'admin_add_gifts') {
-      result = addWishlistGifts_(sheet, request.gifts);
+      result = addWishlistGifts_(sheet, batchGifts);
     } else if (request.action === 'admin_add_gift') {
       result = addWishlistGift_(sheet, request.giftId, newGift);
     } else {
@@ -355,23 +359,26 @@ function addWishlistGift_(sheet, giftId, gift) {
   }
 }
 
-function addWishlistGifts_(sheet, entries) {
+function validateWishlistGiftBatch_(entries) {
   if (!Array.isArray(entries) || !entries.length || entries.length > WISHLIST_BATCH_LIMIT) {
-    return { ok: false, code: 'invalid_gift_batch' };
+    return null;
   }
   const inputIds = new Set();
   const validated = [];
   for (const entry of entries) {
     const id = entry?.giftId;
     if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id) || inputIds.has(id)) {
-      return { ok: false, code: 'invalid_gift_batch' };
+      return null;
     }
     const gift = wishlistGiftInput_(entry);
-    if (!gift) return { ok: false, code: 'invalid_gift_batch' };
+    if (!gift) return null;
     inputIds.add(id);
     validated.push({ id, ...gift });
   }
+  return validated;
+}
 
+function addWishlistGifts_(sheet, validated) {
   const rows = wishlistGiftRows_(sheet);
   const knownIds = new Set(rows.map(([id]) => id));
   const linkKey = link => wishlistProductUrl_(link) || String(link).trim();
@@ -488,27 +495,42 @@ function wishlistProductUrl_(link) {
   return '';
 }
 
-function fetchWishlistProduct_(link) {
-  const url = wishlistProductUrl_(link);
-  if (!url) return {};
+function fillWishlistProductDetails_(gifts) {
+  const missing = gifts.filter(gift => !gift.name || gift.price === '');
+  const urls = [...new Set(missing.map(gift => wishlistProductUrl_(gift.link)).filter(Boolean))];
+  if (!urls.length) return;
 
-  let details = {};
+  const details = new Map();
   try {
     const cache = CacheService.getScriptCache();
-    const key = 'product:' + url;
-    const cached = cache.get(key);
-    if (cached) return JSON.parse(cached);
-    const response = UrlFetchApp.fetch(url, {
-      followRedirects: false, muteHttpExceptions: true, timeoutSeconds: 5,
+    const cached = cache.getAll(urls.map(url => 'product:' + url));
+    const pending = urls.filter(url => {
+      const value = cached['product:' + url];
+      if (!value) return true;
+      details.set(url, JSON.parse(value));
+      return false;
     });
-    if (response.getResponseCode() === 200) {
-      details = parseWishlistProduct_(response.getContentText().slice(0, 2000000));
+    if (pending.length) {
+      const responses = UrlFetchApp.fetchAll(pending.map(url => ({
+        url, followRedirects: false, muteHttpExceptions: true, timeoutSeconds: 5,
+      })));
+      for (const [index, response] of responses.entries()) {
+        const product = response.getResponseCode() === 200
+          ? parseWishlistProduct_(response.getContentText().slice(0, 2000000))
+          : {};
+        details.set(pending[index], product);
+        cache.put('product:' + pending[index], JSON.stringify(product), Object.keys(product).length ? 21600 : 600);
+      }
     }
-    cache.put(key, JSON.stringify(details), Object.keys(details).length ? 21600 : 600);
   } catch {
-    // The gift can still be saved when retailer details are unavailable.
+    // Use any details already collected and leave the remaining fields as entered.
   }
-  return details;
+  for (const gift of missing) {
+    const product = details.get(wishlistProductUrl_(gift.link));
+    if (!product) continue;
+    if (!gift.name && product.name) gift.name = product.name;
+    if (gift.price === '' && product.price != null) gift.price = product.price;
+  }
 }
 
 function parseWishlistProduct_(html) {
