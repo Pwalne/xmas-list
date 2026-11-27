@@ -7,8 +7,10 @@ a separate Google spreadsheet maintained by another family.
 
 ## Managing gifts
 
-In the wishlist's tab, enter a gift name, an optional HTTP or HTTPS
-shopping link, and an optional **High**, **Normal**, or **Low** priority. Leave
+In the wishlist's tab, enter a gift name or an HTTP or HTTPS shopping link,
+and an optional **High**, **Normal**, or **Low** priority. When the name is
+blank, the site uses a name from the product URL when available, or shows
+the store's hostname. Enter a name to override what the site displays. Leave
 the **Gift ID** alone. The wishlist assigns it automatically. Available gifts
 appear in priority order, with Sheet row order breaking ties. Sort or move full
 rows to keep the IDs, gifts, and checkmarks together.

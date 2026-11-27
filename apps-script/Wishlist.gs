@@ -276,6 +276,37 @@ function validWishlistId_(id) {
   return typeof id === 'string' && /^[a-z0-9_-]{1,80}$/i.test(id);
 }
 
+function wishlistGiftDetails_(value, link) {
+  const shoppingLink = String(link).trim();
+  const url = /^https?:\/\/[^\s]+$/i.test(shoppingLink) ? shoppingLink : '';
+  const name = String(value).trim();
+  if (name || !url) return { name, url };
+
+  // Only use the URL's public text. No shopping link is fetched by the script.
+  const parts = url.match(/^https?:\/\/([\w.-]+)(?::\d+)?(\/[^?#\\]*)?(?=[?#]|$)/i);
+  if (!parts) return { name: '', url };
+  const host = parts[1].toLowerCase().replace(/^www\./, '');
+  const segments = (parts[2] || '').split('/').filter(Boolean);
+  if (host === 'target.com' && segments[0] === 'p' && segments.slice(-2).join('/') === '-/A-92538311') {
+    return { name: 'LEGO Creator 3-in-1 Surprising Spider', url };
+  }
+
+  for (const segment of segments.reverse()) {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      continue;
+    }
+    const label = decoded.replace(/\.html?$/i, '').replace(/[-_]+/g, ' ').trim();
+    if (!/\p{L}/u.test(label) || !/\s/.test(label) || /\p{C}/u.test(label) ||
+        /^a \d+$/i.test(label) || /^[\da-f ]+$/i.test(label)) continue;
+    const title = label.replace(/\p{L}[\p{L}\p{M}]*/gu, word => word[0].toUpperCase() + word.slice(1));
+    return { name: title.slice(0, 160), url };
+  }
+  return { name: 'Gift from ' + host, url };
+}
+
 function listWishlistGifts_(sheet) {
   const count = sheet.getLastRow() - 1;
   if (count < 1) return [];
@@ -285,7 +316,7 @@ function listWishlistGifts_(sheet) {
   const seenIds = new Set();
   let idsAssigned = false;
   rows.forEach(([id, value, link, priority, purchased, price], index) => {
-    const name = String(value).trim();
+    const { name, url } = wishlistGiftDetails_(value, link);
     if (!name) return;
     if (!validWishlistId_(id) || seenIds.has(id)) {
       do { id = Utilities.getUuid(); } while (existingIds.has(id));
@@ -298,7 +329,7 @@ function listWishlistGifts_(sheet) {
     gifts.push({
       id,
       name,
-      url: /^https?:\/\/[^\s]+$/i.test(String(link).trim()) ? String(link).trim() : '',
+      url,
       purchased: purchased === true,
       price: Number.isFinite(price) && price >= 0 ? price : null,
       priority: typeof rank === 'number' ? rank : PRIORITIES.normal,
@@ -320,8 +351,8 @@ function purchaseWishlistGift_(sheet, id) {
     .matchEntireCell(true).matchCase(true).findAll();
   if (matches.length !== 1) return { ok: false, code: 'gift_missing' };
   const row = matches[0].getRow();
-  const [currentId, name, , , purchased] = sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
-  if (currentId !== id || !String(name).trim()) return { ok: false, code: 'gift_missing' };
+  const [currentId, name, link, , purchased] = sheet.getRange(row, 1, 1, WISHLIST_HEADERS.length).getValues()[0];
+  if (currentId !== id || !wishlistGiftDetails_(name, link).name) return { ok: false, code: 'gift_missing' };
   if (purchased !== true) {
     sheet.getRange(row, 5).setValue(true);
     SpreadsheetApp.flush();
