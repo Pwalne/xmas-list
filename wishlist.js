@@ -357,9 +357,10 @@ adminForm.addEventListener('submit', async event => {
   setBusy(true);
   adminStatus.textContent = 'Unlocking settings…';
   try {
-    const result = await request('admin_unlock', { passphrase: adminPassphrase.value });
+    const result = await request('admin_unlock', { passphrase: adminPassphrase.value, includeLists: true });
     adminToken = result.token;
-    await loadManagedLists();
+    if (result.lists) managedLists = result.lists;
+    else await loadManagedLists();
     adminPanel.close();
     const directory = managedLists.map(({ id, name }) => ({ id, name }));
     if (JSON.stringify(directory) === JSON.stringify(lists)) {
@@ -462,9 +463,9 @@ addGiftForm.addEventListener('submit', async event => {
   adminStatus.textContent = 'Adding gift…';
   try {
     const existing = editingGift;
-    await request(existing ? 'admin_edit_gift' : 'admin_add_gift', {
+    const result = await request(existing ? 'admin_edit_gift' : 'admin_add_gift', {
       ...fields, adminToken, listId: list.id, previous: JSON.stringify(list),
-      giftId: existing?.gift.id || pendingGiftId, revision: existing?.revision,
+      giftId: existing?.gift.id || pendingGiftId, revision: existing?.revision, includeView: true,
     });
     pendingGiftId = undefined;
     editingGift = null;
@@ -473,7 +474,8 @@ addGiftForm.addEventListener('submit', async event => {
     const message = existing ? 'Gift updated.' : 'Gift added to ' + list.name + '.';
     showStatus(message);
     try {
-      await loadGifts();
+      if (result.view) displayGifts(result.view);
+      else await loadGifts();
     } catch (error) {
       reportError(error, message + ' Use Refresh to load the updated list.');
     }
@@ -485,11 +487,12 @@ addGiftForm.addEventListener('submit', async event => {
   }
 });
 
-async function refreshAfterManage(message, listId) {
+async function refreshAfterManage(message, listId, updatedLists) {
   adminPanel.close();
   showStatus(message);
   try {
-    await loadManagedLists();
+    if (updatedLists) managedLists = updatedLists;
+    else await loadManagedLists();
     await applyWishlistDirectory(managedLists.map(({ id, name }) => ({ id, name })), false, listId);
   } catch (error) {
     reportAdminError(error, message + ' Use Refresh to load the updated lists.');
@@ -510,12 +513,15 @@ confirmRemoval.addEventListener('click', async () => {
   try {
     const fields = { listId: list.id, previous: JSON.stringify(list), adminToken };
     if (gift) {
-      await request('admin_remove_gift', { ...fields, giftId: gift.gift.id, revision: gift.revision });
+      const result = await request('admin_remove_gift', {
+        ...fields, giftId: gift.gift.id, revision: gift.revision, includeView: true,
+      });
       showStatus('Gift deleted.');
-      await loadGifts();
+      if (result.view) displayGifts(result.view);
+      else await loadGifts();
     } else {
-      await request('admin_remove_list', fields);
-      await refreshAfterManage('Removed ' + list.name + ' from the wishlist tabs.');
+      const result = await request('admin_remove_list', fields);
+      await refreshAfterManage('Removed ' + list.name + ' from the wishlist tabs.', undefined, result.managedLists);
     }
   } catch (error) {
     reportAdminError(error, gift ? 'Couldn’t delete the gift or reload the list. Use Refresh to check.' : 'Couldn’t remove the wishlist. Try again.');
@@ -532,10 +538,10 @@ addListForm.addEventListener('submit', async event => {
   adminStatus.textContent = 'Checking and connecting the Sheet…';
   try {
     const previous = editingList;
-    const { list } = await request(previous ? 'admin_edit_list' : 'admin_add_list', {
+    const { list, managedLists: updatedLists } = await request(previous ? 'admin_edit_list' : 'admin_add_list', {
       ...fields, adminToken, listId: previous?.id, previous: previous ? JSON.stringify(previous) : undefined,
     });
-    await refreshAfterManage(previous ? 'Saved changes to ' + list.name + '.' : 'Added ' + list.name + ' to the wishlist tabs.', list.id);
+    await refreshAfterManage(previous ? 'Saved changes to ' + list.name + '.' : 'Added ' + list.name + ' to the wishlist tabs.', list.id, updatedLists);
   } catch (error) {
     if (error.message === 'list_unavailable') adminStatus.textContent = 'Check the tab name, gift column headers, and Google Sheet sharing.';
     else reportAdminError(error, 'Couldn’t save the wishlist. Try again.');
@@ -553,6 +559,11 @@ async function loadGifts(focusHeading = false) {
   const listId = selectedList?.id;
   // Older Apps Script deployments still need the flag to skip retailer requests.
   const result = await request('list', { listId, skipLookup: true });
+  displayGifts(result, focusHeading);
+}
+
+function displayGifts(result, focusHeading = false) {
+  if (!result.ok) throw new Error(result.code);
   gifts = result.gifts;
   listRevision = result.listRevision;
   passphrase.value = '';
@@ -566,12 +577,26 @@ async function loadGifts(focusHeading = false) {
 async function openWishlists(focusHeading = false) {
   if (adminToken) {
     try {
-      await loadManagedLists();
-      return applyWishlistDirectory(managedLists.map(({ id, name }) => ({ id, name })), focusHeading);
+      let result;
+      try {
+        result = await request('admin_open', { adminToken, listId: currentWishlistId() });
+      } catch (error) {
+        if (error.message !== 'invalid_request') throw error;
+        await loadManagedLists();
+        return applyWishlistDirectory(managedLists.map(({ id, name }) => ({ id, name })), focusHeading);
+      }
+      managedLists = result.managedLists;
+      return applyWishlistDirectory(result.lists, focusHeading, result.selectedId, result.view);
     } catch (error) {
       if (error.message !== 'admin_session_expired') throw error;
       closeAdmin();
     }
+  }
+  try {
+    const result = await request('open', { listId: currentWishlistId() });
+    return applyWishlistDirectory(result.lists, focusHeading, result.selectedId, result.view);
+  } catch (error) {
+    if (error.message !== 'invalid_request') throw error;
   }
   let directory;
   try {
@@ -587,19 +612,25 @@ async function openWishlists(focusHeading = false) {
   return applyWishlistDirectory(directory.lists, focusHeading);
 }
 
-async function applyWishlistDirectory(connectedLists, focusHeading = false, preferredId) {
-  let previousSelection;
+function currentWishlistId() {
+  if (selectedList) return selectedList.id;
   try {
-    previousSelection = sessionStorage.getItem(selectionStorageKey);
+    return sessionStorage.getItem(selectionStorageKey);
   } catch {
-    // Continue without a saved selection.
+    return undefined;
   }
+}
+
+async function applyWishlistDirectory(connectedLists, focusHeading = false, preferredId, view) {
   lists = connectedLists;
-  const next = lists.find(list => list.id === (preferredId || selectedList?.id || previousSelection)) || lists[0];
+  const next = lists.find(list => list.id === (preferredId || currentWishlistId())) || lists[0];
   if (next?.id !== selectedList?.id) clearGifts();
   renderWishlistTabs();
   selectWishlist(next?.id);
-  if (next) return loadGifts(focusHeading);
+  if (next) {
+    if (view) return displayGifts(view, focusHeading);
+    return loadGifts(focusHeading);
+  }
 
   passphrase.value = '';
   unlockPanel.hidden = true;
@@ -639,9 +670,10 @@ unlockForm.addEventListener('submit', async event => {
   setBusy(true);
   showOpeningStatus();
   try {
-    const result = await request('unlock', { passphrase: passphrase.value });
+    const result = await request('unlock', { passphrase: passphrase.value, includeView: true, listId: currentWishlistId() });
     storeSession(result.token);
-    await openWishlists(true);
+    if (result.lists) await applyWishlistDirectory(result.lists, true, result.selectedId, result.view);
+    else await openWishlists(true);
   } catch (error) {
     if (unlockPanel.hidden === false) storeSession('');
     reportError(error, 'Couldn’t open the wishlist. Please try again.');

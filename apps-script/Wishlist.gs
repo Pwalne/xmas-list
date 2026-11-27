@@ -7,7 +7,7 @@ const MAX_FAILED_ATTEMPTS = 12;
 const WISHLIST_SETTINGS = 'Wishlist settings';
 const SETTINGS_HEADERS = ['List ID', 'Child name', 'Spreadsheet URL or ID', 'Gift tab'];
 const GIFT_ADMIN_ACTIONS = ['admin_add_gift', 'admin_get_gift', 'admin_edit_gift', 'admin_remove_gift'];
-const ADMIN_ACTIONS = ['admin_unlock', 'admin_lists', 'admin_add_list', 'admin_edit_list', 'admin_remove_list', ...GIFT_ADMIN_ACTIONS];
+const ADMIN_ACTIONS = ['admin_unlock', 'admin_lists', 'admin_open', 'admin_add_list', 'admin_edit_list', 'admin_remove_list', ...GIFT_ADMIN_ACTIONS];
 
 // Run in the editor after setting WISHLIST_SPREADSHEET_ID.
 function setupWishlist() {
@@ -65,9 +65,14 @@ function doPost(event) {
         if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
           return wishlistResponse_({ ok: false, code: 'invalid_request' });
         }
-        return wishlistResponse_(withWishlistLock_(() => unlockWishlist_(
-          request.passphrase, properties, adminPassphrase, adminKey, 'WISHLIST_ADMIN_FAILED_ATTEMPTS', 30 * 60 * 1000
-        )));
+        return wishlistResponse_(withWishlistLock_(() => {
+          const result = unlockWishlist_(
+            request.passphrase, properties, adminPassphrase, adminKey, 'WISHLIST_ADMIN_FAILED_ATTEMPTS', 30 * 60 * 1000
+          );
+          if (!result.ok || !request.includeLists) return result;
+          const directory = manageWishlists_(properties, { action: 'admin_lists' }, adminKey, sessionKey);
+          return directory.ok ? { ...result, lists: directory.lists } : directory;
+        }));
       }
       if (!validWishlistToken_(request.adminToken, adminKey, Date.now())) {
         return wishlistResponse_({ ok: false, code: 'admin_session_expired' });
@@ -85,15 +90,19 @@ function doPost(event) {
           if (newGift.price === '' && details.price != null) newGift.price = details.price;
         }
       }
-      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request, adminKey, newGift)));
+      return wishlistResponse_(withWishlistLock_(() => manageWishlists_(properties, request, adminKey, sessionKey, newGift)));
     }
     if (request.action === 'unlock') {
       if (typeof request.passphrase !== 'string' || !request.passphrase || request.passphrase.length > 256) {
         return wishlistResponse_({ ok: false, code: 'invalid_request' });
       }
-      return wishlistResponse_(withWishlistLock_(() => unlockWishlist_(request.passphrase, properties, passphrase, sessionKey)));
+      return wishlistResponse_(withWishlistLock_(() => {
+        const result = unlockWishlist_(request.passphrase, properties, passphrase, sessionKey);
+        if (!result.ok || !request.includeView) return result;
+        return { ...result, ...openWishlist_(configuredWishlists_(properties), request.listId, sessionKey) };
+      }));
     }
-    if (request.action !== 'directory' && request.action !== 'list' && request.action !== 'purchase') {
+    if (!['open', 'directory', 'list', 'purchase'].includes(request.action)) {
       return wishlistResponse_({ ok: false, code: 'invalid_request' });
     }
     if (!validWishlistToken_(request.token, sessionKey, Date.now())) {
@@ -105,12 +114,13 @@ function doPost(event) {
 
     return wishlistResponse_(withWishlistLock_(() => {
       const lists = configuredWishlists_(properties);
+      if (request.action === 'open') return openWishlist_(lists, request.listId, sessionKey);
       if (request.action === 'directory') {
         return { ok: true, lists: Array.from(lists.values(), ({ id, name }) => ({ id, name })) };
       }
       const list = lists.get(request.listId ?? (lists.size === 1 ? lists.keys().next().value : ''));
       if (!list) return { ok: false, code: 'list_unavailable' };
-      const listRevision = signWishlist_(JSON.stringify([list.id, list.spreadsheetId, list.tab]), sessionKey);
+      const listRevision = wishlistSourceRevision_(list, sessionKey);
       if (request.action === 'purchase' && request.listRevision != null && request.listRevision !== listRevision) {
         return { ok: false, code: 'list_changed' };
       }
@@ -123,6 +133,25 @@ function doPost(event) {
     console.error('Wishlist operation failed: ' + error.name);
     return wishlistResponse_({ ok: false, code: 'service_unavailable' });
   }
+}
+
+function wishlistSourceRevision_(list, sessionKey) {
+  return signWishlist_(JSON.stringify([list.id, list.spreadsheetId, list.tab]), sessionKey);
+}
+
+function wishlistView_(list, sessionKey, sheet = wishlistGiftSheet_(list)) {
+  if (!sheet) return { ok: false, code: 'list_unavailable' };
+  return { ok: true, gifts: listWishlistGifts_(sheet), listRevision: wishlistSourceRevision_(list, sessionKey) };
+}
+
+function openWishlist_(lists, preferredId, sessionKey) {
+  const list = lists.get(preferredId) || lists.values().next().value;
+  return {
+    ok: true,
+    lists: Array.from(lists.values(), ({ id, name }) => ({ id, name })),
+    selectedId: list?.id,
+    view: list ? wishlistView_(list, sessionKey) : null,
+  };
 }
 
 function withWishlistLock_(callback) {
@@ -170,7 +199,10 @@ function configuredWishlists_(properties) {
   const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
   if (!homeId) throw new Error('Set WISHLIST_SPREADSHEET_ID to the private settings spreadsheet ID.');
   const home = SpreadsheetApp.openById(homeId);
-  const settings = home.getSheetByName(WISHLIST_SETTINGS);
+  return readConfiguredWishlists_(homeId, home.getSheetByName(WISHLIST_SETTINGS));
+}
+
+function readConfiguredWishlists_(homeId, settings) {
   const lists = new Map();
   if (!settings) {
     lists.set('family', { id: 'family', name: 'Family', spreadsheetId: homeId, tab: 'Gifts' });
@@ -198,11 +230,11 @@ function configuredWishlists_(properties) {
   return lists;
 }
 
-function manageWishlists_(properties, request, adminKey, newGift) {
+function manageWishlists_(properties, request, adminKey, sessionKey, newGift) {
   const homeId = properties.getProperty('WISHLIST_SPREADSHEET_ID');
   const settings = SpreadsheetApp.openById(homeId).getSheetByName(WISHLIST_SETTINGS);
   if (!settings) return { ok: false, code: 'admin_unavailable' };
-  const lists = configuredWishlists_(properties);
+  const lists = readConfiguredWishlists_(homeId, settings);
   const renderList = list => ({
     id: list.id,
     name: list.name,
@@ -212,6 +244,9 @@ function manageWishlists_(properties, request, adminKey, newGift) {
   if (request.action === 'admin_lists') {
     return { ok: true, lists: Array.from(lists.values(), renderList) };
   }
+  if (request.action === 'admin_open') {
+    return { ...openWishlist_(lists, request.listId, sessionKey), managedLists: Array.from(lists.values(), renderList) };
+  }
   const existing = lists.get(request.listId);
   if (request.action !== 'admin_add_list') {
     if (!existing || JSON.stringify(renderList(existing)) !== request.previous) {
@@ -219,14 +254,24 @@ function manageWishlists_(properties, request, adminKey, newGift) {
     }
   }
   if (GIFT_ADMIN_ACTIONS.includes(request.action)) {
-    return request.action === 'admin_add_gift'
-      ? addWishlistGift_(existing, request.giftId, newGift)
-      : editWishlistGift_(existing, request, adminKey);
+    const sheet = wishlistGiftSheet_(existing);
+    if (!sheet) return { ok: false, code: 'list_unavailable' };
+    const result = request.action === 'admin_add_gift'
+      ? addWishlistGift_(sheet, request.giftId, newGift)
+      : editWishlistGift_(sheet, existing.id, request, adminKey);
+    if (!result.ok || !request.includeView || request.action === 'admin_get_gift') return result;
+    try {
+      return { ...result, view: wishlistView_(existing, sessionKey, sheet) };
+    } catch {
+      // The mutation was saved. Let the client retry just the read.
+      return result;
+    }
   }
   if (request.action === 'admin_remove_list') {
     settings.getRange(existing.row, 1, 1, SETTINGS_HEADERS.length).clearContent();
     SpreadsheetApp.flush();
-    return { ok: true };
+    lists.delete(existing.id);
+    return { ok: true, managedLists: Array.from(lists.values(), renderList) };
   }
 
   const { name, source, tab } = request;
@@ -254,7 +299,8 @@ function manageWishlists_(properties, request, adminKey, newGift) {
     row.map(value => SpreadsheetApp.newRichTextValue().setText(value).build()),
   ]);
   SpreadsheetApp.flush();
-  return { ok: true, list: { id, name: name.trim() } };
+  lists.set(id, { id, name: name.trim(), spreadsheetId, tab });
+  return { ok: true, list: renderList(lists.get(id)), managedLists: Array.from(lists.values(), renderList) };
 }
 
 function wishlistGiftInput_(request) {
@@ -277,9 +323,7 @@ function literalGiftText_(text) {
   return /^[=']/.test(text) ? "'" + text : text;
 }
 
-function addWishlistGift_(list, giftId, gift) {
-  const sheet = wishlistGiftSheet_(list);
-  if (!sheet) return { ok: false, code: 'list_unavailable' };
+function addWishlistGift_(sheet, giftId, gift) {
   const rows = wishlistGiftRows_(sheet);
   if (rows.some(row => row[0] === giftId)) return { ok: true };
 
@@ -299,10 +343,8 @@ function addWishlistGift_(list, giftId, gift) {
   }
 }
 
-function editWishlistGift_(list, request, adminKey) {
+function editWishlistGift_(sheet, listId, request, adminKey) {
   if (!validWishlistId_(request.giftId)) return { ok: false, code: 'invalid_gift' };
-  const sheet = wishlistGiftSheet_(list);
-  if (!sheet) return { ok: false, code: 'list_unavailable' };
   const cells = findWishlistGift_(sheet, request.giftId);
   if (!cells) return { ok: false, code: 'gift_missing' };
   const [values] = cells.getValues();
@@ -311,7 +353,7 @@ function editWishlistGift_(list, request, adminKey) {
     return { ok: false, code: 'gift_missing' };
   }
   const [formulas] = cells.getFormulas();
-  const revision = signWishlist_(JSON.stringify([list.id, values, formulas]), adminKey);
+  const revision = signWishlist_(JSON.stringify([listId, values, formulas]), adminKey);
   const knownPriority = ['High', 'Normal', 'Low'].find(value => value.toLowerCase() === String(priority).trim().toLowerCase());
   if (request.action === 'admin_get_gift') {
     return { ok: true, gift: {
