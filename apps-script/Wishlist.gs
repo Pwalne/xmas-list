@@ -84,6 +84,11 @@ function doPost(event) {
       }
       let newGift;
       let batchGifts;
+      if (request.action === 'admin_edit_gift' && amazonShortProductUrl_(request.link)) {
+        newGift = wishlistGiftInput_(request);
+        if (!newGift) return wishlistResponse_({ ok: false, code: 'invalid_gift' });
+        fillWishlistProductDetails_([newGift]);
+      }
       if (request.action === 'admin_add_gift') {
         newGift = wishlistGiftInput_(request);
         if (!newGift || typeof request.giftId !== 'string' || !/^[0-9a-f-]{36}$/.test(request.giftId)) {
@@ -270,7 +275,7 @@ function manageWishlists_(properties, request, adminKey, sessionKey, newGift, ba
     } else if (request.action === 'admin_add_gift') {
       result = addWishlistGift_(sheet, request.giftId, newGift);
     } else {
-      result = editWishlistGift_(sheet, existing.id, request, adminKey);
+      result = editWishlistGift_(sheet, existing.id, request, adminKey, newGift);
     }
     if (!result.ok || !request.includeView || request.action === 'admin_get_gift') return result;
     try {
@@ -403,7 +408,7 @@ function appendWishlistRows_(sheet, rows, additions) {
   SpreadsheetApp.flush();
 }
 
-function editWishlistGift_(sheet, listId, request, adminKey) {
+function editWishlistGift_(sheet, listId, request, adminKey, preparedGift) {
   if (!validWishlistId_(request.giftId)) return { ok: false, code: 'invalid_gift' };
   const cells = findWishlistGift_(sheet, request.giftId);
   if (!cells) return { ok: false, code: 'gift_missing' };
@@ -425,7 +430,7 @@ function editWishlistGift_(sheet, listId, request, adminKey) {
   if (request.action === 'admin_remove_gift') {
     cells.clearContent();
   } else {
-    const gift = wishlistGiftInput_(request);
+    const gift = preparedGift || wishlistGiftInput_(request);
     if (!gift) return { ok: false, code: 'invalid_gift' };
     const replacements = [id, gift.name, gift.link, gift.priority, values[4], gift.price];
     const original = [id, String(name), String(link), knownPriority || 'Normal', values[4],
@@ -486,17 +491,63 @@ function wishlistProductUrl_(link) {
   return '';
 }
 
+function amazonShortProductUrl_(link) {
+  const match = typeof link === 'string' && link.trim().match(/^https?:\/\/a\.co\/d\/([a-z0-9]+)\/?(?:[?#]|$)/i);
+  return match ? 'https://a.co/d/' + match[1] : '';
+}
+
+function resolveAmazonShortProducts_(gifts) {
+  const urls = [...new Set(gifts.map(gift => amazonShortProductUrl_(gift.link)).filter(Boolean))];
+  if (!urls.length) return;
+
+  const destinations = new Map();
+  try {
+    const cache = CacheService.getScriptCache();
+    const cached = cache.getAll(urls.map(url => 'redirect:' + url));
+    const pending = [];
+    for (const url of urls) {
+      const saved = cached['redirect:' + url];
+      if (saved) destinations.set(url, saved);
+      else pending.push(url);
+    }
+    if (pending.length) {
+      const responses = UrlFetchApp.fetchAll(pending.map(url => ({
+        url, followRedirects: false, muteHttpExceptions: true, timeoutSeconds: 5,
+      })));
+      for (const [index, response] of responses.entries()) {
+        if (![301, 302, 303, 307, 308].includes(response.getResponseCode())) continue;
+        const headers = response.getHeaders();
+        const locationKey = Object.keys(headers).find(key => key.toLowerCase() === 'location');
+        const location = headers[locationKey];
+        if (typeof location !== 'string' || !/^(?:https:)?\/\/(?:www\.)?amazon\.com\//i.test(location)) continue;
+        const product = wishlistProductUrl_(location.startsWith('//') ? 'https:' + location : location);
+        if (!product) continue;
+        destinations.set(pending[index], product);
+        cache.put('redirect:' + pending[index], product, 21600);
+      }
+    }
+  } catch {
+    // Preserve the original store link if the redirect cannot be resolved.
+  }
+  for (const gift of gifts) {
+    const product = destinations.get(amazonShortProductUrl_(gift.link));
+    if (product) gift.link = product;
+  }
+}
+
 function fillWishlistProductDetails_(gifts) {
+  resolveAmazonShortProducts_(gifts);
   const missing = gifts.filter(gift => !gift.name || gift.price === '');
   const urls = [...new Set(missing.map(gift => wishlistProductUrl_(gift.link)).filter(Boolean))];
   if (!urls.length) return;
 
   const details = new Map();
+  const cacheKey = url => (url.startsWith('https://www.amazon.com/') ? 'amazon-product:' : 'product:') + url;
   try {
     const cache = CacheService.getScriptCache();
-    const cached = cache.getAll(urls.map(url => 'product:' + url));
+    const cached = cache.getAll(urls.map(cacheKey));
     const pending = urls.filter(url => {
-      const value = cached['product:' + url];
+      const value = cached[cacheKey(url)];
       if (!value) return true;
       details.set(url, JSON.parse(value));
       return false;
@@ -506,11 +557,12 @@ function fillWishlistProductDetails_(gifts) {
         url, followRedirects: false, muteHttpExceptions: true, timeoutSeconds: 5,
       })));
       for (const [index, response] of responses.entries()) {
+        const url = pending[index];
         const product = response.getResponseCode() === 200
-          ? parseWishlistProduct_(response.getContentText().slice(0, 2000000))
+          ? parseWishlistProduct_(response.getContentText().slice(0, 2000000), url)
           : {};
-        details.set(pending[index], product);
-        cache.put('product:' + pending[index], JSON.stringify(product), Object.keys(product).length ? 21600 : 600);
+        details.set(url, product);
+        cache.put(cacheKey(url), JSON.stringify(product), Object.keys(product).length ? 21600 : 600);
       }
     }
   } catch {
@@ -524,7 +576,36 @@ function fillWishlistProductDetails_(gifts) {
   }
 }
 
-function parseWishlistProduct_(html) {
+function wishlistProductTitle_(rawName) {
+  if (typeof rawName !== 'string') return undefined;
+  const entities = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ' };
+  const title = rawName.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, value) => {
+    if (!value.startsWith('#')) return entities[value.toLowerCase()] ?? whole;
+    const number = /^#x/i.test(value) ? parseInt(value.slice(2), 16) : Number(value.slice(1));
+    return number > 31 && number <= 0x10ffff && !(number >= 0xd800 && number <= 0xdfff)
+      ? String.fromCodePoint(number) : whole;
+  }).replace(/\s+/g, ' ').trim();
+  return title && title.length <= 200 ? title : undefined;
+}
+
+function parseAmazonWishlistProduct_(html) {
+  const title = html.match(/<span\b[^>]*\bid=["']productTitle["'][^>]*>([^<]*)<\/span>/i);
+  if (!title) return {};
+  const name = wishlistProductTitle_(title[1]);
+  const result = name ? { name } : {};
+  const prices = new Set();
+  for (const [, raw] of html.matchAll(/<span\b[^>]*\bclass=["'](?:[^"']*\s)?apex-pricetopay-value(?:\s[^"']*)?["'][^>]*>\s*<span\b[^>]*\bclass=["']a-offscreen["'][^>]*>\s*\$((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})\s*<\/span>/gi)) {
+    prices.add(Number(raw.replace(/,/g, '')));
+  }
+  if (prices.size === 1) {
+    const price = prices.values().next().value;
+    if (Number.isFinite(price) && price <= 999999999.99) result.price = price;
+  }
+  return result;
+}
+
+function parseWishlistProduct_(html, url = '') {
+  const fallback = url.startsWith('https://www.amazon.com/') ? parseAmazonWishlistProduct_(html) : {};
   const products = [];
   function collect(node, depth = 0) {
     if (!node || typeof node !== 'object' || depth > 8) return;
@@ -556,21 +637,12 @@ function parseWishlistProduct_(html) {
   }
   const one = values => values?.size === 1 ? values.values().next().value : undefined;
   const result = {};
-  if (products.length > 1) return result;
+  if (products.length > 1) return fallback;
   const product = products[0];
   const productPage = !!product || one(metadata.get('og:type')) === 'product' || metadata.has('product:price:amount');
-  if (!productPage) return result;
-  const rawName = product?.name || one(metadata.get('og:title'));
-  if (typeof rawName === 'string') {
-    const entities = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ' };
-    const title = rawName.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, value) => {
-      if (!value.startsWith('#')) return entities[value.toLowerCase()] ?? whole;
-      const number = /^#x/i.test(value) ? parseInt(value.slice(2), 16) : Number(value.slice(1));
-      return number > 31 && number <= 0x10ffff && !(number >= 0xd800 && number <= 0xdfff)
-        ? String.fromCodePoint(number) : whole;
-    }).replace(/\s+/g, ' ').trim();
-    if (title && title.length <= 200) result.name = title;
-  }
+  if (!productPage) return fallback;
+  const name = wishlistProductTitle_(product?.name || one(metadata.get('og:title'))) || fallback.name;
+  if (name) result.name = name;
 
   const usdPrice = (amount, currency) =>
     currency === 'USD' && /^\d+(?:\.\d{1,2})?$/.test(String(amount).trim()) && Number.isFinite(Number(amount))
@@ -581,7 +653,7 @@ function parseWishlistProduct_(html) {
     one(metadata.get('product:price:amount') || metadata.get('price')),
     one(metadata.get('product:price:currency') || metadata.get('pricecurrency'))
   );
-  if (price != null) result.price = price;
+  if (price != null || fallback.price != null) result.price = price ?? fallback.price;
   return result;
 }
 
