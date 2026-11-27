@@ -83,6 +83,10 @@ function showOpeningStatus() {
   status.classList.add('opening');
 }
 
+function finishOpeningWishlist() {
+  if (status.classList.contains('opening')) showStatus('');
+}
+
 function updateGiftButtonPlacement() {
   if (giftAddFooter.hidden) return;
   // The footer keeps the same height when the button floats.
@@ -152,7 +156,6 @@ function renderWishlistTabs() {
       showOpeningStatus();
       try {
         await loadGifts(true);
-        showStatus('');
       } catch (error) {
         reportError(error, 'Couldn’t open this wishlist. Use Refresh to try again.');
       } finally {
@@ -558,6 +561,7 @@ async function loadGifts(focusHeading = false) {
   unlockPanel.hidden = true;
   giftsPanel.hidden = false;
   renderGifts();
+  finishOpeningWishlist();
   if (focusHeading) giftsHeading.focus();
   if (result.needsMetadata) {
     request('list', { listId }).then(updated => {
@@ -609,14 +613,15 @@ async function applyWishlistDirectory(connectedLists, focusHeading = false, pref
   if (next?.id !== selectedList?.id) clearGifts();
   renderWishlistTabs();
   selectWishlist(next?.id);
+  if (next) return loadGifts(focusHeading);
+
   passphrase.value = '';
   unlockPanel.hidden = true;
   giftsPanel.hidden = false;
-  if (next) return loadGifts(focusHeading);
-
   clearGifts();
   empty.textContent = 'No wishlists have been configured yet.';
   empty.hidden = false;
+  finishOpeningWishlist();
   if (focusHeading) giftsHeading.focus();
 }
 
@@ -651,7 +656,6 @@ unlockForm.addEventListener('submit', async event => {
     const result = await request('unlock', { passphrase: passphrase.value });
     storeSession(result.token);
     await openWishlists(true);
-    showStatus('');
   } catch (error) {
     if (unlockPanel.hidden === false) storeSession('');
     reportError(error, 'Couldn’t open the wishlist. Please try again.');
@@ -690,7 +694,6 @@ async function restoreSession() {
   showOpeningStatus();
   try {
     await openWishlists();
-    showStatus('');
   } catch (error) {
     showLocked(false);
     reportError(error, 'Couldn’t reopen the wishlist. Please enter the passphrase again.');
