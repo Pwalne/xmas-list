@@ -29,7 +29,7 @@
       <h2 id="unlock-heading">Open the wishlist</h2>
       <p>Enter the passphrase shared by your family.</p>
       <form id="unlock">
-        <label for="passphrase">Family passphrase</label>
+        <label for="passphrase">Family passphrase (required)</label>
         <div class="entry-fields">
           <input id="passphrase" type="password" required maxlength="256" autocomplete="off"
             autocapitalize="none" spellcheck="false">
@@ -67,21 +67,21 @@
     <dialog id="wishlist-admin" class="panel entry" aria-labelledby="admin-heading">
       <h2 id="admin-heading">Manage wishlists</h2>
       <form id="admin-unlock" hidden>
-        <label for="admin-passphrase">Admin passphrase</label>
+        <label for="admin-passphrase">Admin passphrase (required)</label>
         <div class="entry-fields">
           <input id="admin-passphrase" type="password" required maxlength="256" autocomplete="off">
           <button type="submit">Unlock settings</button>
         </div>
       </form>
         <form id="add-gift" hidden>
-          <p>Enter a gift name or paste a shopping link.</p>
+          <p id="gift-required-help">A gift name or shopping link is required. You can enter both.</p>
           <label for="new-gift-name">Gift name</label>
-          <input id="new-gift-name" name="name" type="text" maxlength="200">
+          <input id="new-gift-name" name="name" type="text" maxlength="200" aria-describedby="gift-required-help">
           <label for="new-gift-link">Shopping link</label>
-          <input id="new-gift-link" name="link" type="url" maxlength="500">
+          <input id="new-gift-link" name="link" type="url" maxlength="500" aria-describedby="gift-required-help">
           <div class="gift-form-fields">
             <div>
-              <label for="new-gift-priority">Priority</label>
+              <label for="new-gift-priority">Priority (optional)</label>
               <select id="new-gift-priority" name="priority">
                 <option>High</option>
                 <option selected>Normal</option>
@@ -89,20 +89,20 @@
               </select>
             </div>
             <div>
-              <label for="new-gift-price">Price in USD</label>
+              <label for="new-gift-price">Price in USD (optional)</label>
               <input id="new-gift-price" name="price" type="number" min="0" max="999999999.99" step=".01" inputmode="decimal">
             </div>
           </div>
           <button type="submit">Add gift</button>
         </form>
       <form id="add-wishlist" hidden>
-        <label for="child-name">Child name</label>
+        <label for="child-name">Child name (required)</label>
         <input id="child-name" name="name" type="text" required maxlength="80">
-        <label for="sheet-source">Google Sheet link or ID</label>
+        <label for="sheet-source">Google Sheet link or ID (optional)</label>
         <input id="sheet-source" name="source" type="text" maxlength="500" aria-describedby="sheet-help">
         <p id="sheet-help">Leave blank to use a tab in the family workbook. For someone else’s Sheet,
           they should share it as Editor with the organizer’s Google account.</p>
-        <label for="gift-tab">Gift tab name</label>
+        <label for="gift-tab">Gift tab name (required)</label>
         <input id="gift-tab" name="tab" type="text" required maxlength="100" placeholder="Gifts">
         <button id="save-wishlist" type="submit">Add wishlist</button>
       </form>
