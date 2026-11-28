@@ -40,9 +40,6 @@ const purchased = document.querySelector('#purchased');
 const purchasedPanel = document.querySelector('#purchased-panel');
 const template = document.querySelector('#gift-template');
 const priceFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-const targetProductPhotos = new Map([
-  ['92538311', 'https://target.scene7.com/is/image/Target/GUEST_d3e5d017-e003-4bdf-b379-d1516216de06?fmt=pjpeg&hei=300&wid=300'],
-]);
 
 let token = '';
 let gifts = [];
@@ -213,15 +210,6 @@ function shoppingUrl(value) {
   }
 }
 
-function productPhoto(shoppingLink) {
-  const url = new URL(shoppingLink);
-  if (url.hostname === 'www.target.com' || url.hostname === 'target.com') {
-    const id = url.pathname.match(/^\/p\/.*\/A-(\d+)\/?$/i)?.[1];
-    return targetProductPhotos.get(id) || '';
-  }
-  return '';
-}
-
 function renderGifts() {
   const availableRows = document.createDocumentFragment();
   const purchasedRows = document.createDocumentFragment();
@@ -240,7 +228,7 @@ function renderGifts() {
       link.href = url;
       link.setAttribute('aria-label', 'Buy Now: ' + gift.name);
       link.hidden = false;
-      const photoUrl = gift.imageUrl || productPhoto(url);
+      const photoUrl = gift.imageUrl;
       if (photoUrl) {
         const photo = row.querySelector('.gift-photo');
         photo.addEventListener('error', () => { photo.hidden = true; }, { once: true });

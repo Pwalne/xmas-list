@@ -531,10 +531,8 @@ function wishlistProductPhotoUrl_(value) {
 function wishlistPhotoRetryAt_(value, link) {
   const marker = typeof value === 'string' && value.match(/^pending-photo:(\d{13})$/);
   if (marker) return Number(marker[1]);
-  if (value != null && value !== '') return 0;
-  // Older rows have no marker. A saved Amazon link with a blank photo can also be retried.
-  const amazon = wishlistProductUrl_(link).startsWith('https://www.amazon.com/') || amazonShortProductUrl_(link);
-  return amazon ? 1 : 0;
+  if (value != null && value !== '' && value !== false) return 0;
+  return wishlistProductUrl_(link) || amazonShortProductUrl_(link) ? 1 : 0;
 }
 
 function wishlistPhotoValue_(gift) {
