@@ -125,6 +125,7 @@ input[type="password"], #add-wishlist input, #add-wishlist textarea, #add-gift i
 }
 #remove-wishlist-dialog::backdrop, #wishlist-admin::backdrop { background: #14382f70; }
 #remove-wishlist-message { margin: .65rem 0 1rem; }
+#removal-status:not(:empty) { margin: 0 0 1rem; font-weight: 700; }
 #sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
 #wishlist-admin:has(#add-wishlist:not([hidden])) { max-width: min(42rem, calc(100% - 2rem)); }
 .sheet-example {
@@ -164,7 +165,7 @@ input[type="password"], #add-wishlist input, #add-wishlist textarea, #add-gift i
   overflow-wrap: anywhere;
 }
 #pending-gifts small { display: block; margin-top: .15rem; color: #475b50; }
-#gift-save-status {
+.operation-progress {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -174,7 +175,7 @@ input[type="password"], #add-wishlist input, #add-wishlist textarea, #add-gift i
   color: #fff;
   font-weight: 700;
 }
-#gift-save-status:not(:empty)::before {
+.operation-progress:not(:empty)::before {
   content: '';
   display: inline-block;
   width: .9em;
@@ -186,9 +187,9 @@ input[type="password"], #add-wishlist input, #add-wishlist textarea, #add-gift i
   vertical-align: -.1em;
 }
 @media (prefers-reduced-motion: no-preference) {
-  #gift-save-status:not(:empty)::before { animation: gift-save-spin .7s linear infinite; }
+  .operation-progress:not(:empty)::before { animation: operation-spin .7s linear infinite; }
 }
-@keyframes gift-save-spin { to { transform: rotate(1turn); } }
+@keyframes operation-spin { to { transform: rotate(1turn); } }
 .actions { flex-wrap: wrap; }
 
 button, .shop-link {

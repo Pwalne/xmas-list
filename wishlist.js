@@ -37,6 +37,7 @@ const saveWishlist = document.querySelector('#save-wishlist');
 const removeDialog = document.querySelector('#remove-wishlist-dialog');
 const removalHeading = document.querySelector('#remove-wishlist-heading');
 const removeMessage = document.querySelector('#remove-wishlist-message');
+const removalStatus = document.querySelector('#removal-status');
 const cancelRemoval = document.querySelector('#cancel-wishlist-removal');
 const confirmRemoval = document.querySelector('#confirm-wishlist-removal');
 const empty = document.querySelector('#empty');
@@ -125,6 +126,7 @@ function setBusy(value) {
   adminPanel.querySelectorAll('button').forEach(button => { button.disabled = value; });
   addGiftForm.querySelectorAll('input, select').forEach(field => { field.disabled = value; });
   confirmRemoval.disabled = value;
+  cancelRemoval.disabled = value;
   wishlistTabs.querySelectorAll('button').forEach(button => { button.disabled = value; });
   available.querySelectorAll('input').forEach(input => { input.disabled = value || input.dataset.waitingForId === 'true'; });
   document.querySelectorAll('.gift-admin-actions button').forEach(button => {
@@ -520,16 +522,22 @@ async function openGiftAdmin(gift, removing) {
   const list = selectedManagedList();
   if (!list || !adminToken || busy) return;
   setBusy(true);
+  if (removing) {
+    removalHeading.textContent = 'Delete gift?';
+    removeMessage.textContent = 'Delete ' + gift.name + ' from ' + list.name + ' and its Google Sheet?';
+    confirmRemoval.textContent = 'Delete gift';
+    confirmRemoval.hidden = true;
+    showRemovalStatus('Checking this gift in Google Sheets…', 'pending');
+    removeDialog.showModal();
+  }
   try {
     const result = await request('admin_get_gift', {
       listId: list.id, previous: JSON.stringify(list), giftId: gift.id, adminToken,
     });
     if (removing) {
       removingGift = result;
-      removalHeading.textContent = 'Delete gift?';
-      confirmRemoval.textContent = 'Delete gift';
-      removeMessage.textContent = 'Delete ' + gift.name + ' from ' + list.name + ' and its Google Sheet?';
-      removeDialog.showModal();
+      showRemovalStatus('');
+      confirmRemoval.hidden = false;
     } else {
       editingGift = result;
       resetGiftEntry();
@@ -541,10 +549,12 @@ async function openGiftAdmin(gift, removing) {
       showAdminForm(addGiftForm, 'Edit gift', addGiftForm.elements.name);
     }
   } catch (error) {
-    reportAdminError(error, 'Couldn’t open this gift. Try again.');
+    if (removing) reportGiftRemovalError(error, 'Couldn’t check this gift. Close this dialog and try again.');
+    else reportAdminError(error, 'Couldn’t open this gift. Try again.');
   } finally {
     setBusy(false);
-    if (adminPanel.open && !addGiftForm.hidden) addGiftForm.elements.name.focus();
+    if (removing && removeDialog.open) cancelRemoval.focus();
+    else if (adminPanel.open && !addGiftForm.hidden) addGiftForm.elements.name.focus();
   }
 }
 
@@ -614,34 +624,73 @@ async function refreshAfterManage(message, listId, updatedLists) {
   }
 }
 
+function showRemovalStatus(message, state = '') {
+  removalStatus.classList.toggle('operation-progress', state === 'pending');
+  removalStatus.classList.toggle('error', state === 'error');
+  removalStatus.textContent = message;
+}
+
+function reportGiftRemovalError(error, fallback) {
+  if (error.message === 'session_expired' || error.message === 'admin_session_expired') {
+    removeDialog.close();
+    reportAdminError(error, fallback);
+    return;
+  }
+  const message = error.message === 'gift_changed'
+    ? 'This gift changed. Close this dialog and reopen the gift before deleting it.'
+    : errors[error.message] || fallback;
+  showRemovalStatus(message, 'error');
+  if (confirmRemoval.hidden) cancelRemoval.textContent = 'Close';
+}
+
 cancelRemoval.addEventListener('click', () => removeDialog.close());
+removeDialog.addEventListener('cancel', event => {
+  if (busy) event.preventDefault();
+});
 removeDialog.addEventListener('close', () => {
   removingList = null;
   removingGift = null;
+  confirmRemoval.hidden = false;
+  cancelRemoval.textContent = 'Cancel';
+  showRemovalStatus('');
 });
 confirmRemoval.addEventListener('click', async () => {
   const gift = removingGift;
   const list = gift ? selectedManagedList() : removingList;
   if (busy || !adminToken || !list) return;
-  removeDialog.close();
+  if (!gift) removeDialog.close();
   setBusy(true);
   try {
     const fields = { listId: list.id, previous: JSON.stringify(list), adminToken };
     if (gift) {
-      const result = await request('admin_remove_gift', {
-        ...fields, giftId: gift.gift.id, revision: gift.revision, includeView: true,
+      confirmRemoval.textContent = 'Deleting…';
+      showRemovalStatus('Deleting gift from Google Sheets…', 'pending');
+      await request('admin_remove_gift', {
+        ...fields, giftId: gift.gift.id, revision: gift.revision,
       });
-      showStatus('Gift deleted.');
-      if (result.view) displayGifts(result.view);
-      else await loadGifts();
+      gifts = gifts.filter(item => item.id !== gift.gift.id);
+      renderGifts();
+      showRemovalStatus('Gift deleted.');
+      confirmRemoval.hidden = true;
+      cancelRemoval.textContent = 'Done';
     } else {
       const result = await request('admin_remove_list', fields);
       await refreshAfterManage('Removed ' + list.name + ' from the wishlist tabs.', undefined, result.managedLists);
     }
   } catch (error) {
-    reportAdminError(error, gift ? 'Couldn’t delete the gift or reload the list. Use Refresh to check.' : 'Couldn’t remove the wishlist. Try again.');
+    if (gift) {
+      confirmRemoval.hidden = error.message !== 'busy';
+      confirmRemoval.textContent = 'Delete gift';
+      reportGiftRemovalError(error, 'Couldn’t confirm the deletion. Close this dialog and use Refresh to check.');
+    } else {
+      reportAdminError(error, 'Couldn’t remove the wishlist. Try again.');
+    }
   } finally {
     setBusy(false);
+    if (gift && removeDialog.open) {
+      if (confirmRemoval.hidden) cancelRemoval.focus();
+      else confirmRemoval.focus();
+    }
   }
 });
 
