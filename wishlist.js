@@ -671,20 +671,27 @@ function displayGifts(result, focusHeading = false) {
   finishOpeningWishlist();
   if (focusHeading) giftsHeading.focus();
   if (result.photoRetryDue && selectedList) {
-    retryVisiblePhotos(selectedList.id, listRevision, gifts);
+    retryVisibleGiftDetails(selectedList.id, listRevision, gifts);
   }
 }
 
-async function retryVisiblePhotos(listId, revision, displayedGifts) {
+async function retryVisibleGiftDetails(listId, revision, displayedGifts) {
   try {
-    const { photos } = await request('retry_photos', { listId, listRevision: revision });
+    const { photos, details } = await request('retry_photos', { listId, listRevision: revision });
     if (gifts !== displayedGifts || listRevision !== revision) return;
+    let changed = false;
     for (const gift of displayedGifts) {
-      if (Object.hasOwn(photos, gift.id)) gift.imageUrl = photos[gift.id];
+      if (details && Object.hasOwn(details, gift.id)) {
+        Object.assign(gift, details[gift.id]);
+        changed = true;
+      } else if (photos && Object.hasOwn(photos, gift.id)) {
+        gift.imageUrl = photos[gift.id];
+        changed = true;
+      }
     }
-    if (Object.keys(photos).length && !busy) renderGifts();
+    if (changed && !busy) renderGifts();
   } catch {
-    // Pending photos can be retried on a later reload.
+    // Incomplete details can be retried on a later reload.
   }
 }
 
