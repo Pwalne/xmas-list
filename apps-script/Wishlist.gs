@@ -2,7 +2,7 @@ const WISHLIST_HEADERS = ['Gift ID', 'Gift name', 'Shopping link', 'Priority', '
 const WISHLIST_PHOTO_HEADER = 'Product photo URL';
 const WISHLIST_PHOTO_RETRY_DELAY_MS = 15 * 60 * 1000;
 const WISHLIST_PHOTO_RETRY_BATCH = 6;
-const PRIORITIES = { high: 0, normal: 1, low: 2 };
+const PRIORITIES = ['Highest', 'High', 'Normal', 'Low'];
 const SESSION_LIFETIME_MS = 4 * 60 * 60 * 1000;
 const ATTEMPT_WINDOW_MS = 2 * 60 * 1000;
 const MAX_FAILED_ATTEMPTS = 12;
@@ -369,7 +369,7 @@ function wishlistGiftInput_(request) {
   const { name, link, priority, price } = request;
   if (typeof name !== 'string' || name.length > 200 ||
       typeof link !== 'string' || link.length > 500 ||
-      !['High', 'Normal', 'Low'].includes(priority) ||
+      !PRIORITIES.includes(priority) ||
       typeof price !== 'string' || (price && (!/^\d{1,9}(?:\.\d{1,2})?$/.test(price)))) {
     return null;
   }
@@ -469,7 +469,7 @@ function editWishlistGift_(sheet, listId, request, adminKey, preparedGift) {
   }
   const [formulas] = cells.getFormulas();
   const revision = signWishlist_(JSON.stringify([listId, values, formulas]), adminKey);
-  const knownPriority = ['High', 'Normal', 'Low'].find(value => value.toLowerCase() === String(priority).trim().toLowerCase());
+  const knownPriority = PRIORITIES.find(value => value.toLowerCase() === String(priority).trim().toLowerCase());
   if (request.action === 'admin_get_gift') {
     return { ok: true, gift: {
       id, name: String(name), link: String(link), priority: knownPriority || 'Normal',
@@ -917,7 +917,7 @@ function listWishlistGifts_(sheet, lockHeld = false) {
       repairs.push({ index, id });
     }
     seenIds.add(id);
-    const rank = PRIORITIES[String(priority).trim().toLowerCase()];
+    const rank = PRIORITIES.findIndex(value => value.toLowerCase() === String(priority).trim().toLowerCase());
     gifts.push({
       id,
       name,
@@ -926,7 +926,7 @@ function listWishlistGifts_(sheet, lockHeld = false) {
       price: Number.isFinite(price) && price >= 0 ? price : null,
       imageUrl: wishlistProductPhotoUrl_(photos[index]?.[0]),
       detailsRetryAt: wishlistDetailsRetryAt_(value, price, photos[index]?.[0], link),
-      priority: typeof rank === 'number' ? rank : PRIORITIES.normal,
+      priority: rank >= 0 ? rank : PRIORITIES.indexOf('Normal'),
       order: index,
     });
   });

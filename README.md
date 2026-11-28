@@ -8,7 +8,7 @@ a separate Google spreadsheet maintained by another family.
 ## Managing gifts
 
 In the wishlist's tab, enter a gift name or an HTTP or HTTPS shopping link,
-and an optional **High**, **Normal**, or **Low** priority. When the name is
+and an optional **Low**, **Normal**, **High**, or **Highest** priority. When the name is
 blank, the site can use the title from a supported product page. Otherwise it
 uses the product URL or the store's hostname. Leave
 the **Gift ID** alone. The wishlist assigns it automatically. Available gifts
