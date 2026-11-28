@@ -17,6 +17,7 @@ const adminPanel = document.querySelector('#wishlist-admin');
 const adminForm = document.querySelector('#admin-unlock');
 const adminPassphrase = document.querySelector('#admin-passphrase');
 const addListForm = document.querySelector('#add-wishlist');
+const copySheetStatus = document.querySelector('#copy-sheet-status');
 const adminStatus = document.querySelector('#admin-status');
 const adminHeading = document.querySelector('#admin-heading');
 const cancelAdmin = document.querySelector('#cancel-admin-dialog');
@@ -389,6 +390,7 @@ function selectedManagedList() {
 function openListEditor(list) {
   editingList = list;
   addListForm.reset();
+  copySheetStatus.textContent = '';
   saveWishlist.textContent = list ? 'Save changes' : 'Add wishlist';
   if (list) {
     addListForm.elements.name.value = list.name;
@@ -397,6 +399,16 @@ function openListEditor(list) {
   }
   showAdminForm(addListForm, list ? 'Edit wishlist' : 'Connect a spreadsheet', addListForm.elements.name);
 }
+
+document.querySelector('#copy-sheet-headers').addEventListener('click', async () => {
+  const row = Array.from(document.querySelectorAll('#sheet-example thead th'), header => header.textContent.trim()).join('\t');
+  try {
+    await navigator.clipboard.writeText(row);
+    copySheetStatus.textContent = 'Copied. Paste into cell A1.';
+  } catch {
+    copySheetStatus.textContent = 'Copy the header row from the example and paste it into A1.';
+  }
+});
 
 editConnectedList.addEventListener('click', () => {
   const list = selectedManagedList();

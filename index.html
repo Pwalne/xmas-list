@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=17">
-  <script src="./wishlist.js?v=25" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=18">
+  <script src="./wishlist.js?v=26" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -113,6 +113,37 @@
           they should share it as Editor with the organizer’s Google account.</p>
         <label for="gift-tab">Gift tab name <span class="required-label">(required)</span></label>
         <input id="gift-tab" name="tab" type="text" required maxlength="100" placeholder="Gifts">
+        <section class="sheet-example" aria-labelledby="sheet-example-heading">
+          <h3 id="sheet-example-heading">Example gift tab</h3>
+          <p>Put these six headers in cells A1–F1, in this order.</p>
+          <div class="sheet-example-scroll" role="region" aria-label="Example spreadsheet columns" tabindex="0">
+            <table id="sheet-example">
+              <thead>
+                <tr>
+                  <th scope="col">Gift ID</th>
+                  <th scope="col">Gift name</th>
+                  <th scope="col">Shopping link</th>
+                  <th scope="col">Priority</th>
+                  <th scope="col">Purchased</th>
+                  <th scope="col">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td></td>
+                  <td>Toy train</td>
+                  <td>https://example.com/toy-train</td>
+                  <td>Normal</td>
+                  <td>FALSE</td>
+                  <td>12.50</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Leave Gift ID blank. If you use checkboxes, add them only to Purchased. The wishlist adds the Product photo URL column when needed.</p>
+          <button id="copy-sheet-headers" class="secondary" type="button">Copy column headers</button>
+          <span id="copy-sheet-status" class="status" role="status"></span>
+        </section>
         <button id="save-wishlist" type="submit">Add wishlist</button>
       </form>
       <p id="admin-status" class="status" role="status"></p>

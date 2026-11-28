@@ -125,6 +125,24 @@ input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
 #remove-wishlist-dialog::backdrop, #wishlist-admin::backdrop { background: #14382f70; }
 #remove-wishlist-message { margin: .65rem 0 1rem; }
 #sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
+#wishlist-admin:has(#add-wishlist:not([hidden])) { max-width: min(42rem, calc(100% - 2rem)); }
+.sheet-example {
+  background: #f0f5ec;
+  border: 1px solid #c4d1c3;
+  border-radius: .65rem;
+  padding: .75rem;
+  margin: .25rem 0 .9rem;
+}
+.sheet-example h3 { margin: 0; font-size: 1.05rem; }
+.sheet-example p { margin: .4rem 0 .65rem; color: #475b50; font-size: .875rem; }
+.sheet-example-scroll { overflow-x: auto; border: 1px solid #c4d1c3; border-radius: .35rem; }
+#sheet-example { border-collapse: collapse; width: 100%; font-size: .875rem; white-space: nowrap; }
+#sheet-example th, #sheet-example td { text-align: left; padding: .45rem .55rem; }
+#sheet-example th { background: #dfeadd; border-bottom: 1px solid #c4d1c3; }
+#sheet-example td { background: #fffef9; }
+#sheet-example :is(th, td) + :is(th, td) { border-left: 1px solid #c4d1c3; }
+#copy-sheet-status { display: inline-block; margin: .35rem .35rem 0; font-size: .875rem; }
+#copy-sheet-status:empty { display: none; }
 #gift-queue {
   background: #f0f5ec;
   border: 1px solid #c4d1c3;
