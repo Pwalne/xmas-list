@@ -125,7 +125,16 @@ input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
 #remove-wishlist-dialog::backdrop, #wishlist-admin::backdrop { background: #14382f70; }
 #remove-wishlist-message { margin: .65rem 0 1rem; }
 #sheet-help { margin: -.35rem 0 .9rem; color: #475b50; font-size: .9rem; }
-#pending-gifts { list-style: none; padding: 0; max-height: 11rem; overflow-y: auto; }
+#gift-queue {
+  background: #f0f5ec;
+  border: 1px solid #c4d1c3;
+  border-radius: .65rem;
+  padding: .75rem;
+  margin-bottom: 1rem;
+}
+#gift-queue h3 { margin: 0; font-size: 1.05rem; }
+#gift-queue p { margin: .25rem 0 .6rem; color: #475b50; font-size: .875rem; }
+#pending-gifts { list-style: none; margin: 0; padding: 0; max-height: 10rem; overflow-y: auto; }
 #pending-gifts li {
   display: flex;
   align-items: center;
@@ -135,6 +144,32 @@ input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
   padding: .35rem 0;
   overflow-wrap: anywhere;
 }
+#pending-gifts small { display: block; margin-top: .15rem; color: #475b50; }
+#gift-save-status {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: .85rem 1rem;
+  border-radius: .55rem;
+  background: #244f3c;
+  color: #fff;
+  font-weight: 700;
+}
+#gift-save-status:not(:empty)::before {
+  content: '';
+  display: inline-block;
+  width: .9em;
+  height: .9em;
+  margin-inline-end: .5em;
+  border: .13em solid #ffffff80;
+  border-top-color: #fff;
+  border-radius: 50%;
+  vertical-align: -.1em;
+}
+@media (prefers-reduced-motion: no-preference) {
+  #gift-save-status:not(:empty)::before { animation: gift-save-spin .7s linear infinite; }
+}
+@keyframes gift-save-spin { to { transform: rotate(1turn); } }
 .actions { flex-wrap: wrap; }
 
 button, .shop-link {

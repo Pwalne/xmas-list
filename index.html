@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=16">
-  <script src="./wishlist.js?v=23" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=17">
+  <script src="./wishlist.js?v=24" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -66,6 +66,7 @@
 
     <dialog id="wishlist-admin" class="panel entry" aria-labelledby="admin-heading">
       <h2 id="admin-heading">Manage wishlists</h2>
+      <p id="gift-save-status" class="status" role="status"></p>
       <form id="admin-unlock" hidden>
         <label for="admin-passphrase">Admin passphrase <span class="required-label">(required)</span></label>
         <div class="entry-fields">
@@ -74,6 +75,11 @@
         </div>
       </form>
         <form id="add-gift" hidden>
+          <section id="gift-queue" aria-labelledby="gift-queue-heading" hidden>
+            <h3 id="gift-queue-heading" aria-live="polite"></h3>
+            <p>These gifts will be added when you click Done.</p>
+            <ul id="pending-gifts"></ul>
+          </section>
           <p id="gift-required-help">A gift name or shopping link is required. You can enter both.</p>
           <label for="new-gift-name">Gift name</label>
           <input id="new-gift-name" name="name" type="text" maxlength="200" aria-describedby="gift-required-help">
@@ -97,7 +103,6 @@
             <button id="save-gifts" type="submit">Done</button>
             <button id="queue-gift" class="secondary" type="button">Add another</button>
           </div>
-          <ul id="pending-gifts" aria-label="Gifts ready to add" hidden></ul>
         </form>
       <form id="add-wishlist" hidden>
         <label for="child-name">Child name <span class="required-label">(required)</span></label>
