@@ -9,6 +9,8 @@ const MAX_FAILED_ATTEMPTS = 12;
 
 const WISHLIST_SETTINGS = 'Wishlist settings';
 const SETTINGS_HEADERS = ['List ID', 'Child name', 'Spreadsheet URL or ID', 'Gift tab'];
+const SETTINGS_BANNER_HEADER = 'Banner';
+const WISHLIST_BANNER_LIMIT = 240;
 const GIFT_ADMIN_ACTIONS = ['admin_add_gift', 'admin_add_gifts', 'admin_get_gift', 'admin_edit_gift', 'admin_remove_gift'];
 const WISHLIST_BATCH_LIMIT = 25;
 const ADMIN_ACTIONS = ['admin_unlock', 'admin_lists', 'admin_open', 'admin_add_list', 'admin_edit_list', 'admin_remove_list', ...GIFT_ADMIN_ACTIONS];
@@ -135,7 +137,7 @@ function doPost(event) {
       const lists = configuredWishlists_(properties);
       if (request.action === 'open') return openWishlist_(lists, request.listId, sessionKey);
       if (request.action === 'directory') {
-        return { ok: true, lists: Array.from(lists.values(), ({ id, name }) => ({ id, name })) };
+        return { ok: true, lists: Array.from(lists.values(), wishlistDirectoryEntry_) };
       }
       const list = lists.get(request.listId ?? (lists.size === 1 ? lists.keys().next().value : ''));
       if (!list) return { ok: false, code: 'list_unavailable' };
@@ -175,7 +177,7 @@ function openWishlist_(lists, preferredId, sessionKey) {
   const list = lists.get(preferredId) || lists.values().next().value;
   return {
     ok: true,
-    lists: Array.from(lists.values(), ({ id, name }) => ({ id, name })),
+    lists: Array.from(lists.values(), wishlistDirectoryEntry_),
     selectedId: list?.id,
     view: list ? wishlistView_(list, sessionKey) : null,
   };
@@ -228,6 +230,15 @@ function configuredWishlists_(properties) {
   return readConfiguredWishlists_(homeId, home.getSheetByName(WISHLIST_SETTINGS));
 }
 
+function wishlistDirectoryEntry_({ id, name, banner }) {
+  return banner ? { id, name, banner } : { id, name };
+}
+
+function wishlistSettingsBannerColumn_(headers) {
+  const index = headers.indexOf(SETTINGS_BANNER_HEADER, SETTINGS_HEADERS.length);
+  return index < 0 ? 0 : index + 1;
+}
+
 function readConfiguredWishlists_(homeId, settings) {
   const lists = new Map();
   if (!settings) {
@@ -235,15 +246,17 @@ function readConfiguredWishlists_(homeId, settings) {
     return lists;
   }
 
-  const headers = settings.getRange(1, 1, 1, SETTINGS_HEADERS.length).getDisplayValues()[0];
+  const headers = settings.getRange(1, 1, 1, Math.max(SETTINGS_HEADERS.length, settings.getLastColumn())).getDisplayValues()[0];
   if (!SETTINGS_HEADERS.every((header, index) => header === headers[index])) {
     throw new Error('Unexpected Wishlist settings headers.');
   }
   const count = settings.getLastRow() - 1;
   if (count < 1) return lists;
-  const rows = settings.getRange(2, 1, count, SETTINGS_HEADERS.length).getDisplayValues();
+  const bannerColumn = wishlistSettingsBannerColumn_(headers);
+  const rows = settings.getRange(2, 1, count, Math.max(SETTINGS_HEADERS.length, bannerColumn)).getDisplayValues();
 
-  for (const [index, [rawId, rawName, source, tab]] of rows.entries()) {
+  for (const [index, row] of rows.entries()) {
+    const [rawId, rawName, source, tab] = row;
     const id = rawId.trim();
     const name = rawName.trim();
     const spreadsheetId = source.trim() ? wishlistSpreadsheetId_(source.trim()) : homeId;
@@ -251,7 +264,8 @@ function readConfiguredWishlists_(homeId, settings) {
         !tab.trim() ||
         (spreadsheetId === homeId && tab.toLowerCase() === WISHLIST_SETTINGS.toLowerCase())) continue;
     if (lists.has(id)) throw new Error('Duplicate list ID in Wishlist settings.');
-    lists.set(id, { id, name, spreadsheetId, tab, row: index + 2 });
+    const banner = bannerColumn ? row[bannerColumn - 1].trim().slice(0, WISHLIST_BANNER_LIMIT) : '';
+    lists.set(id, { id, name, spreadsheetId, tab, banner, row: index + 2 });
   }
   return lists;
 }
@@ -262,8 +276,7 @@ function manageWishlists_(properties, request, adminKey, sessionKey, newGift, ba
   if (!settings) return { ok: false, code: 'admin_unavailable' };
   const lists = readConfiguredWishlists_(homeId, settings);
   const renderList = list => ({
-    id: list.id,
-    name: list.name,
+    ...wishlistDirectoryEntry_(list),
     source: list.spreadsheetId === homeId ? '' : list.spreadsheetId,
     tab: list.tab,
   });
@@ -300,15 +313,17 @@ function manageWishlists_(properties, request, adminKey, sessionKey, newGift, ba
   }
   if (request.action === 'admin_remove_list') {
     settings.getRange(existing.row, 1, 1, SETTINGS_HEADERS.length).clearContent();
+    if (existing.banner) writeWishlistBanner_(settings, existing.row, '');
     SpreadsheetApp.flush();
     lists.delete(existing.id);
     return { ok: true, managedLists: Array.from(lists.values(), renderList) };
   }
 
-  const { name, source, tab } = request;
+  const { name, source, tab, banner = existing?.banner || '' } = request;
   if (typeof name !== 'string' || !name.trim() || name.length > 80 ||
       typeof source !== 'string' || source.length > 500 ||
-      typeof tab !== 'string' || !tab.trim() || tab.length > 100) {
+      typeof tab !== 'string' || !tab.trim() || tab.length > 100 ||
+      typeof banner !== 'string' || banner.length > WISHLIST_BANNER_LIMIT) {
     return { ok: false, code: 'invalid_list_settings' };
   }
   const spreadsheetId = source.trim() ? wishlistSpreadsheetId_(source.trim()) : homeId;
@@ -329,9 +344,25 @@ function manageWishlists_(properties, request, adminKey, sessionKey, newGift, ba
   settings.getRange(nextRow, 1, 1, row.length).setRichTextValues([
     row.map(value => SpreadsheetApp.newRichTextValue().setText(value).build()),
   ]);
+  if (banner.trim() !== (existing?.banner || '')) writeWishlistBanner_(settings, nextRow, banner.trim());
   SpreadsheetApp.flush();
-  lists.set(id, { id, name: name.trim(), spreadsheetId, tab });
+  lists.set(id, { id, name: name.trim(), spreadsheetId, tab, banner: banner.trim() });
   return { ok: true, list: renderList(lists.get(id)), managedLists: Array.from(lists.values(), renderList) };
+}
+
+function writeWishlistBanner_(settings, row, banner) {
+  const last = settings.getLastColumn();
+  const headers = settings.getRange(1, 1, 1, last).getDisplayValues()[0];
+  let column = wishlistSettingsBannerColumn_(headers);
+  if (!column) {
+    if (!banner) return;
+    column = last + 1;
+    if (column > settings.getMaxColumns()) settings.insertColumnsAfter(last, 1);
+    settings.getRange(1, column).setValue(SETTINGS_BANNER_HEADER);
+  }
+  const cell = settings.getRange(row, column);
+  if (banner) cell.setRichTextValue(SpreadsheetApp.newRichTextValue().setText(banner).build());
+  else cell.clearContent();
 }
 
 function wishlistGiftInput_(request) {

@@ -80,7 +80,7 @@ h3 { font-size: 1.37rem; }
 .entry form { margin-top: 1.3rem; }
 .entry label { display: block; margin-bottom: .35rem; font-size: .9rem; font-weight: 650; }
 .entry-fields { display: flex; gap: .65rem; }
-input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
+input[type="password"], #add-wishlist input, #add-wishlist textarea, #add-gift input, #add-gift select {
   width: 100%;
   min-width: 0;
   border: 1px solid #aebdb0;
@@ -91,7 +91,8 @@ input[type="password"], #add-wishlist input, #add-gift input, #add-gift select {
   font: inherit;
 }
 
-#add-wishlist input, #add-gift input, #add-gift select { margin-bottom: .75rem; }
+#add-wishlist input, #add-wishlist textarea, #add-gift input, #add-gift select { margin-bottom: .75rem; }
+#add-wishlist textarea { resize: vertical; }
 #add-gift p { margin: .35rem 0 .85rem; }
 .gift-form-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 #gift-add-footer {
@@ -234,6 +235,16 @@ button:disabled { opacity: .6; cursor: default; }
 #wishlist-tabs button[aria-pressed="true"] { background: #244f3c; color: #fff; }
 .list-header, .actions { display: flex; align-items: center; gap: .5rem; }
 .list-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: .85rem; }
+#wishlist-banner {
+  margin: 0 0 1rem;
+  padding: .75rem .9rem;
+  border-inline-start: .25rem solid #8c513d;
+  border-radius: .35rem;
+  background: #fbf1e5;
+  color: #403126;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .gift-list { list-style: none; margin: 0; padding: 0; }
 .gift-row {
   display: flex;

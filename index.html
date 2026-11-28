@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#14382f">
   <meta name="wishlist-endpoint" content="https://script.google.com/macros/s/AKfycbzWiuV4ezSonXI-EWgd3hbTNHSHLxNwlKQdmC22EEr7DbNYdDjyajfIIA_ronsGWr_C1Q/exec">
   <title>Family Christmas Wishlist</title>
-  <link rel="stylesheet" href="./wishlist.css?v=18">
-  <script src="./wishlist.js?v=26" defer></script>
+  <link rel="stylesheet" href="./wishlist.css?v=19">
+  <script src="./wishlist.js?v=27" defer></script>
 </head>
 <body>
   <main class="wishlist">
@@ -51,6 +51,7 @@
             aria-controls="wishlist-admin">Manage wishlists</button>
         </div>
       </div>
+      <p id="wishlist-banner" hidden></p>
       <p id="empty" hidden></p>
       <ul id="available" class="gift-list"></ul>
       <section id="purchased-panel" aria-labelledby="purchased-heading" hidden>
@@ -113,6 +114,9 @@
           they should share it as Editor with the organizer’s Google account.</p>
         <label for="gift-tab">Gift tab name <span class="required-label">(required)</span></label>
         <input id="gift-tab" name="tab" type="text" required maxlength="100" placeholder="Gifts">
+        <label for="list-banner">Wishlist banner (optional)</label>
+        <textarea id="list-banner" name="banner" rows="2" maxlength="240"
+          placeholder="Example: Clothing size 2T, shoe size 5"></textarea>
         <section class="sheet-example" aria-labelledby="sheet-example-heading">
           <h3 id="sheet-example-heading">Example gift tab</h3>
           <p>Put these six headers in cells A1–F1, in this order.</p>

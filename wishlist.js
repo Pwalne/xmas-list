@@ -17,6 +17,7 @@ const adminPanel = document.querySelector('#wishlist-admin');
 const adminForm = document.querySelector('#admin-unlock');
 const adminPassphrase = document.querySelector('#admin-passphrase');
 const addListForm = document.querySelector('#add-wishlist');
+const wishlistBanner = document.querySelector('#wishlist-banner');
 const copySheetStatus = document.querySelector('#copy-sheet-status');
 const adminStatus = document.querySelector('#admin-status');
 const adminHeading = document.querySelector('#admin-heading');
@@ -133,6 +134,9 @@ function setBusy(value) {
 
 function selectWishlist(id) {
   selectedList = lists.find(list => list.id === id) || null;
+  const banner = selectedList?.banner || '';
+  wishlistBanner.textContent = banner;
+  wishlistBanner.hidden = !banner;
   giftsHeading.textContent = selectedList ? selectedList.name + '’s gift ideas' : 'Gift ideas';
   syncAdminControls();
   wishlistTabs.querySelectorAll('button').forEach(button => {
@@ -365,7 +369,7 @@ adminForm.addEventListener('submit', async event => {
     if (result.lists) managedLists = result.lists;
     else await loadManagedLists();
     adminPanel.close();
-    const directory = managedLists.map(({ id, name }) => ({ id, name }));
+    const directory = managedLists.map(({ id, name, banner }) => ({ id, name, banner }));
     if (JSON.stringify(directory) === JSON.stringify(lists)) {
       renderWishlistTabs();
       selectWishlist(selectedList?.id);
@@ -396,6 +400,7 @@ function openListEditor(list) {
     addListForm.elements.name.value = list.name;
     addListForm.elements.source.value = list.source;
     addListForm.elements.tab.value = list.tab;
+    addListForm.elements.banner.value = list.banner || '';
   }
   showAdminForm(addListForm, list ? 'Edit wishlist' : 'Connect a spreadsheet', addListForm.elements.name);
 }
@@ -603,7 +608,7 @@ async function refreshAfterManage(message, listId, updatedLists) {
   try {
     if (updatedLists) managedLists = updatedLists;
     else await loadManagedLists();
-    await applyWishlistDirectory(managedLists.map(({ id, name }) => ({ id, name })), false, listId);
+    await applyWishlistDirectory(managedLists.map(({ id, name, banner }) => ({ id, name, banner })), false, listId);
   } catch (error) {
     reportAdminError(error, message + ' Use Refresh to load the updated lists.');
   }
@@ -716,7 +721,7 @@ async function openWishlists(focusHeading = false) {
       } catch (error) {
         if (error.message !== 'invalid_request') throw error;
         await loadManagedLists();
-        return applyWishlistDirectory(managedLists.map(({ id, name }) => ({ id, name })), focusHeading);
+        return applyWishlistDirectory(managedLists.map(({ id, name, banner }) => ({ id, name, banner })), focusHeading);
       }
       managedLists = result.managedLists;
       return applyWishlistDirectory(result.lists, focusHeading, result.selectedId, result.view);
